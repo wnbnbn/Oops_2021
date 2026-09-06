@@ -1,0 +1,46 @@
+name: LocalFeed v0.4 Compile
+
+on:
+  push:
+    branches:
+      - localfeed-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install API 36
+        run: sdkmanager "platforms;android-36" "platform-tools" "build-tools;36.0.0"
+      - name: Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Stable debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 -d localfeed_ci/stable_debug_keystore.b64 > "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep SHA256
+      - name: Rehydrate v0.4 source
+        run: python3 localfeed_ci/rehydrate_v04.py
+      - name: Assemble v0.4
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Verify APK
+        run: "$ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose --print-certs /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk"
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalFeed-v0.4-stable-signed-debug-apk
+          path: /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
