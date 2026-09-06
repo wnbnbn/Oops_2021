@@ -15,8 +15,7 @@ jobs:
 
       - name: Diagnose source chunks
         run: |
-          wc -c localfeed_ci/chunk_*.b64
-          sha256sum localfeed_ci/chunk_*.b64
+          wc -c localfeed_ci/chunk_00.b64 localfeed_ci/chunk_01.b64 localfeed_ci/chunk_02.b64 localfeed_ci/chunk_03.b64 localfeed_ci/chunk_04a.b64 localfeed_ci/chunk_04b.b64 localfeed_ci/chunk_05.b64 localfeed_ci/chunk_06.b64 localfeed_ci/chunk_07.b64
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,12 +39,17 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import base64, re
-          parts = sorted(Path('localfeed_ci').glob('chunk_*.b64'))
-          raw = b''.join(p.read_bytes() for p in parts)
+          names = [
+              'chunk_00.b64','chunk_01.b64','chunk_02.b64','chunk_03.b64',
+              'chunk_04a.b64','chunk_04b.b64',
+              'chunk_05.b64','chunk_06.b64','chunk_07.b64'
+          ]
+          raw = b''.join((Path('localfeed_ci') / name).read_bytes() for name in names)
           clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
+          assert len(clean) == 62604, f'unexpected base64 length: {len(clean)}'
           data = base64.b64decode(clean, validate=False)
           Path('/tmp/localfeed.zip').write_bytes(data)
-          print('chunks', len(parts), 'raw', len(raw), 'clean', len(clean), 'zip', len(data))
+          print('raw', len(raw), 'clean', len(clean), 'zip', len(data))
           PY
           unzip -t /tmp/localfeed.zip
           mkdir -p /tmp/localfeed
