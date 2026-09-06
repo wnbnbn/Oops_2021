@@ -1,0 +1,21 @@
+<resources>
+    <style name="AlbumChip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_marginEnd">7dp</item>
+        <item name="android:background">@drawable/chip_bg</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minWidth">54dp</item>
+        <item name="android:paddingStart">13dp</item>
+        <item name="android:paddingEnd">13dp</item>
+        <item name="android:textColor">#D9FFFFFF</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+    <style name="SelectionAction">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">42dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">#D9FFFFFF</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+</resources>

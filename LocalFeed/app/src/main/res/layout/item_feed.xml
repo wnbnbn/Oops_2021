@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/pageRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <com.localfeed.app.ui.ZoomImageView
+        android:id="@+id/imageView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:contentDescription="media"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/playerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        app:keep_content_on_player_reset="true"
+        app:resize_mode="zoom"
+        app:show_buffering="never"
+        app:surface_type="surface_view"
+        app:use_controller="false" />
+
+    <ImageView
+        android:id="@+id/posterView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:contentDescription="video poster"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/fullscreenButton"
+        android:layout_width="wrap_content"
+        android:layout_height="38dp"
+        android:layout_gravity="center_horizontal"
+        android:background="@drawable/media_badge_bg"
+        android:gravity="center"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:text="全屏观看  ↗"
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/pauseBadge"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:text="▶"
+        android:textColor="#EFFFFFFF"
+        android:textSize="38sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/likeBurst"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:text="♥"
+        android:textColor="#FFFFFFFF"
+        android:textSize="82sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/rightActions"
+        android:layout_width="56dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|bottom"
+        android:layout_marginEnd="6dp"
+        android:layout_marginBottom="128dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/likeButton"
+            android:layout_width="56dp"
+            android:layout_height="62dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:foreground="?attr/selectableItemBackgroundBorderless">
+            <ImageView android:id="@+id/likeIcon" android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_heart_outline" android:contentDescription="点赞" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="点赞" android:textColor="#F2FFFFFF" android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/favoriteButton"
+            android:layout_width="56dp"
+            android:layout_height="62dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:foreground="?attr/selectableItemBackgroundBorderless">
+            <ImageView android:id="@+id/favoriteIcon" android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_star_outline" android:contentDescription="收藏" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="收藏" android:textColor="#F2FFFFFF" android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/moreButton"
+            android:layout_width="56dp"
+            android:layout_height="62dp"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:foreground="?attr/selectableItemBackgroundBorderless">
+            <ImageView android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_more" android:contentDescription="更多" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="更多" android:textColor="#F2FFFFFF" android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/mediaInfo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="72dp"
+        android:layout_marginBottom="94dp"
+        android:ellipsize="middle"
+        android:maxLines="1"
+        android:textColor="#E6FFFFFF"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/timePreview"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="92dp"
+        android:background="@drawable/media_badge_bg"
+        android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+        android:text="00:00 / 00:00" android:textColor="@android:color/white" android:textSize="13sp" android:visibility="gone" />
+
+    <com.localfeed.app.ui.FeedProgressView
+        android:id="@+id/progress"
+        android:layout_width="match_parent"
+        android:layout_height="30dp"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="58dp"
+        android:paddingStart="2dp"
+        android:paddingEnd="2dp" />
+
+    <TextView
+        android:id="@+id/speedBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="54dp"
+        android:background="@drawable/media_badge_bg"
+        android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="8dp" android:paddingBottom="8dp"
+        android:text="2.0× 快进中" android:textColor="@android:color/white" android:textStyle="bold" android:visibility="gone" />
+</FrameLayout>
