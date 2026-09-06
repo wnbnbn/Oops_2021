@@ -110,8 +110,6 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == 'd02bc35059a4cd807a6ae02f0e755d7e76785eabe1561daf98877499c8fee566'
           Path('/tmp/localfeed-v04.patch').write_bytes(data)
 
-          # CI's v0.3 baseline already contains the AGP 9.4/Kotlin build-file compatibility edits.
-          # Keep those build files out of the feature patch and normalize version/build settings below.
           text = data.decode('utf-8')
           sections = text.split('diff --git ')
           kept = [sections[0]]
@@ -131,6 +129,34 @@ jobs:
           PY
           cd /tmp/localfeed/LocalFeed_v0.2
           patch --batch --forward -p1 < /tmp/localfeed-v04-code.patch
+
+          # The local v0.4 diff contained untracked/new files which standard git diff did not encode.
+          # Restore that small file set from its independently hashed archive.
+          cd "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, re
+          expected = [
+              ('v04new_00.b64', 6000, 'f8d4d7369921b64362a14189c3793a2db98664a89da1e94debd8d6f4acf4294b'),
+              ('v04new_01.b64', 3292, 'a33a4d7070e0ee732dfebf0ef2fb9f980d672aad7e18a8065883828af7c371d6'),
+          ]
+          parts=[]
+          for name,want_len,want_sha in expected:
+              part=re.sub(rb'[^A-Za-z0-9+/=]', b'', (Path('localfeed_ci')/name).read_bytes())
+              got=hashlib.sha256(part).hexdigest()
+              print(name, 'len=', len(part), 'sha=', got)
+              assert len(part)==want_len and got==want_sha
+              parts.append(part)
+          clean=b''.join(parts)
+          assert len(clean)==9292
+          assert hashlib.sha256(clean).hexdigest()=='bf8db9ae56e96dbf50569d188c913975e6a761d00724dd977315cd0eea9bdd93'
+          data=base64.b64decode(clean, validate=True)
+          assert len(data)==6968
+          assert hashlib.sha256(data).hexdigest()=='b4a66545ffcda3c3479a243a6428b3b5cbaec3907da50fd91b5abb20618f666e'
+          Path('/tmp/v04-new-files.tar.gz').write_bytes(data)
+          PY
+          cd /tmp/localfeed/LocalFeed_v0.2
+          tar -xzf /tmp/v04-new-files.tar.gz
 
           python3 - <<'PY'
           from pathlib import Path
