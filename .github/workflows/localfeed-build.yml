@@ -87,10 +87,21 @@ jobs:
           from pathlib import Path
           import base64, gzip, re, hashlib
           names = ['v04_patch_00.b64','v04_patch_01.b64','v04_patch_02.b64','v04_patch_03.b64']
-          raw = b''.join((Path('localfeed_ci') / name).read_bytes() for name in names)
-          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
-          assert len(clean) == 47464, f'unexpected v0.4 patch base64 length: {len(clean)}'
-          data = gzip.decompress(base64.b64decode(clean, validate=False))
+          expected = [
+              (12000,'3ccc3c7b4cff087b30ae39771007e354b26214ad3889f9770056f716e2f5f8f6'),
+              (12000,'1001e2676f1510a88e68658999822d0ecc12efc384d39449dc3b59e0db63b8eb'),
+              (12000,'ebd1a0fda070c78eb3cdccebe13ffd48b8ec9e63c7e3a9903323f5b10368a055'),
+              (11464,'39dd96d39125ddc4af46810a2ddf9aaec641b3ebd39f1c50972ba31a00504c28')
+          ]
+          parts=[]
+          for name,(want_len,want_sha) in zip(names,expected):
+              part=re.sub(rb'[^A-Za-z0-9+/=]',b'',(Path('localfeed_ci')/name).read_bytes())
+              got=hashlib.sha256(part).hexdigest()
+              print(name, 'len=',len(part),'sha=',got,'expected=',want_len,want_sha)
+              assert len(part)==want_len and got==want_sha, f'corrupt chunk: {name}'
+              parts.append(part)
+          clean=b''.join(parts)
+          data = gzip.decompress(base64.b64decode(clean, validate=True))
           assert hashlib.sha256(data).hexdigest() == 'b7c46070d1da311ce736a76b321233ce06f4cd9393cb9ef575643bc3e78b9bf3'
           Path('/tmp/localfeed-v04.patch').write_bytes(data)
           print('v0.4 patch bytes', len(data))
