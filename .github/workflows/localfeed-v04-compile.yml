@@ -33,6 +33,17 @@ jobs:
           keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep SHA256
       - name: Rehydrate v0.4 source
         run: python3 localfeed_ci/rehydrate_v04.py
+      - name: Fix resource compatibility
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/res/layout/activity_main.xml')
+          s = p.read_text(encoding='utf-8')
+          bad = ' android:selected="true"'
+          assert bad in s
+          p.write_text(s.replace(bad, ''), encoding='utf-8')
+          PY
       - name: Assemble v0.4
         working-directory: /tmp/localfeed/LocalFeed_v0.2
         run: gradle :app:assembleDebug --stacktrace --no-daemon
