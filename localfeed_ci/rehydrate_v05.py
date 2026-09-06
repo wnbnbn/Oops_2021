@@ -54,7 +54,7 @@ archive = Path('/tmp/v05-new-files.tar.gz')
 archive.write_bytes(archive_bytes)
 
 # Historical archive is damaged. Extract as much as gzip/tar can recover, then normalize
-# the recovered Kotlin text so the real compiler can pinpoint the damaged source region.
+# the recovered Kotlin text so we can reconstruct the damaged helper section deterministically.
 extract = subprocess.run(['tar', '-xzf', str(archive)], cwd=PROJECT, check=False)
 print(f'v0.5 archive extraction exit={extract.returncode}')
 
@@ -67,11 +67,33 @@ print(f'SimilarVideoScanner.kt recovered len={len(scanner_bytes)} sha256={hashli
 scanner_text = scanner_bytes.decode('utf-8', errors='replace')
 replacement_count = scanner_text.count('\ufffd')
 print(f'SimilarVideoScanner.kt replacement chars={replacement_count}')
-for i, line in enumerate(scanner_text.splitlines(), 1):
+scanner_lines = scanner_text.splitlines()
+for i, line in enumerate(scanner_lines, 1):
     if '\ufffd' in line:
         print(f'CORRUPT_LINE {i}: {line[:500]}')
-# Re-encode valid UTF-8. This is diagnostic/recovery only; Kotlin compile errors below
-# will tell us exactly what must be reconstructed before this becomes the final source.
+
+print('===== SIMILAR_VIDEO_SCANNER_PREFIX_BEGIN =====')
+for i, line in enumerate(scanner_lines[:205], 1):
+    print(f'{i:04d}: {line}')
+print('===== SIMILAR_VIDEO_SCANNER_PREFIX_END =====')
+
+print('===== SIMILAR_VIDEO_CALLSITES_BEGIN =====')
+needles = ('SimilarVideoScanner', 'SimilarVideoMatch', 'SimilarVideoGroup', 'markNotDuplicate', 'findSimilar', 'scanSimilar')
+for source in sorted((PROJECT / 'app/src/main/java').rglob('*.kt')):
+    if source == scanner:
+        continue
+    text = source.read_text(encoding='utf-8', errors='replace')
+    lines = text.splitlines()
+    for idx, line in enumerate(lines, 1):
+        if any(needle in line for needle in needles):
+            lo = max(1, idx - 3)
+            hi = min(len(lines), idx + 5)
+            print(f'--- {source.relative_to(PROJECT)}:{idx} ---')
+            for j in range(lo, hi + 1):
+                print(f'{j:04d}: {lines[j-1]}')
+print('===== SIMILAR_VIDEO_CALLSITES_END =====')
+
+# Normalize recovered text only for diagnostic compilation; final build will copy a clean source file.
 scanner.write_text(scanner_text, encoding='utf-8')
 assert 'class SimilarVideoScanner' in scanner_text
 playback = PROJECT / 'app/src/main/java/com/localfeed/app/media/PlaybackCoordinator.kt'
