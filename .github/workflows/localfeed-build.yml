@@ -86,12 +86,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import base64, gzip, re, hashlib
-          names = ['v04_patch_00.b64','v04_patch_01.b64','v04_patch_02.b64','v04_patch_03.b64']
+          names = [f'v04r_patch_{i:02d}.b64' for i in range(7)]
           expected = [
-              (12000,'3ccc3c7b4cff087b30ae39771007e354b26214ad3889f9770056f716e2f5f8f6'),
-              (12000,'1001e2676f1510a88e68658999822d0ecc12efc384d39449dc3b59e0db63b8eb'),
-              (12000,'ebd1a0fda070c78eb3cdccebe13ffd48b8ec9e63c7e3a9903323f5b10368a055'),
-              (11464,'39dd96d39125ddc4af46810a2ddf9aaec641b3ebd39f1c50972ba31a00504c28')
+              (6000,'8cec325139132ff4869565edb74e65f1669ab4f9ac2a2db3ce0c07adec4f232a'),
+              (6000,'9e8a1d8087e08fd875db96a06b8f231db15b76c9c9f0a42628bd3942dca0e8af'),
+              (6000,'9dcfeeeff60edda06df7c95507f9feb238cdb759a79431bf6a5f744dc823bd55'),
+              (6000,'abeaaddf06918cbc48bb12425282af543ab33fcde6de59e0eac822fbc770a1f1'),
+              (6000,'ca6758dbd9c7d4ba5e8d0e46b1d5da8d082377ae8c277cb61b11be3953d4aa63'),
+              (6000,'dd01957168ff963f183170aed5405f0cc15b7eaba42398485a461f0cfc950bec'),
+              (4956,'a2c286fdfc7d772dcd7995bfa90cc2f65613eb595263fdf96bf1af79578d50b0')
           ]
           parts=[]
           for name,(want_len,want_sha) in zip(names,expected):
@@ -101,19 +104,25 @@ jobs:
               assert len(part)==want_len and got==want_sha, f'corrupt chunk: {name}'
               parts.append(part)
           clean=b''.join(parts)
+          assert len(clean) == 40956
           data = gzip.decompress(base64.b64decode(clean, validate=True))
-          assert hashlib.sha256(data).hexdigest() == 'b7c46070d1da311ce736a76b321233ce06f4cd9393cb9ef575643bc3e78b9bf3'
+          assert len(data) == 147365
+          assert hashlib.sha256(data).hexdigest() == 'd02bc35059a4cd807a6ae02f0e755d7e76785eabe1561daf98877499c8fee566'
           Path('/tmp/localfeed-v04.patch').write_bytes(data)
           print('v0.4 patch bytes', len(data))
           PY
           cd /tmp/localfeed/LocalFeed_v0.2
           patch -p1 < /tmp/localfeed-v04.patch
-          sed -i 's/versionCode = 3/versionCode = 4/' app/build.gradle.kts
-          sed -i 's/versionName = "0.3.0"/versionName = "0.4.0"/' app/build.gradle.kts
           grep -q 'versionCode = 4' app/build.gradle.kts
           grep -q 'versionName = "0.4.0"' app/build.gradle.kts
           grep -q 'class DuplicateScanner' app/src/main/java/com/localfeed/app/data/DuplicateScanner.kt
           grep -q 'class AlbumDragSelectTouchListener' app/src/main/java/com/localfeed/app/ui/AlbumDragSelectTouchListener.kt
+
+      - name: Run v0.4 pure Kotlin checks
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: |
+          kotlinc app/src/main/java/com/localfeed/app/core/MediaRecord.kt app/src/main/java/com/localfeed/app/ui/AlbumQuery.kt tools/AlbumQueryTest.kt -include-runtime -d /tmp/album-query-test.jar
+          java -jar /tmp/album-query-test.jar
 
       - name: Build v0.4 stable-signed debug APK
         working-directory: /tmp/localfeed/LocalFeed_v0.2
