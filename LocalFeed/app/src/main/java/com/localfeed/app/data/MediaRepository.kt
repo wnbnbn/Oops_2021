@@ -110,7 +110,19 @@ class MediaRepository(private val context: Context) {
     ) {
         val run = generation.incrementAndGet()
         indexIo.execute {
-            val roots = db.folderUris()
+            val configuredRoots = db.folderUris()
+            val grantedRoots = context.contentResolver.persistedUriPermissions
+                .asSequence()
+                .filter { it.isReadPermission }
+                .map { it.uri.toString() }
+                .toHashSet()
+            // A reinstall during certificate migration revokes persisted SAF grants. Keep restored
+            // rows until the user selects each folder again; an unauthorized scan must not prune.
+            val roots = configuredRoots.filter { it in grantedRoots }
+            val authorizationNeeded = configuredRoots.size - roots.size
+            if (authorizationNeeded > 0) {
+                onProgress("有 $authorizationNeeded 个媒体目录需要重新授权 · 已保留原有记录")
+            }
             val allTasks = ArrayList<TreeScanner.MetadataTask>(1024)
             var totalErrors = 0
             roots.forEachIndexed { rootZero, value ->
