@@ -55,7 +55,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import base64, gzip, re
-          names = ['v03_patch_00.b64','v03_patch_01.b64','v03_patch_02.b64']
+          names = [
+              'v03_patch_00.b64','v03_patch_01.b64',
+              'v03_patch_02_0.b64','v03_patch_02_1.b64',
+              'v03_patch_02_2_0.b64','v03_patch_02_2_1.b64',
+              'v03_patch_02_3.b64','v03_patch_02_4.b64',
+              'v03_patch_02_5.b64','v03_patch_02_6.b64'
+          ]
           raw = b''.join((Path('localfeed_ci') / name).read_bytes() for name in names)
           clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
           assert len(clean) == 22816, f'unexpected patch base64 length: {len(clean)}'
