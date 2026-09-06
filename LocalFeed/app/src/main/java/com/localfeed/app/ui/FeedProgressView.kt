@@ -39,7 +39,9 @@ class FeedProgressView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val centerY = height / 2f
+        // Keep the visible line close to the video edge while the taller view supplies a generous
+        // touch target above the system gesture strip.
+        val centerY = height - 6f * density
         val idleStroke = 1.5f * density
         val activeStroke = 3.5f * density
         val stroke = if (scrubbing) activeStroke else idleStroke

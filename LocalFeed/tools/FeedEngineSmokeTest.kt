@@ -1,6 +1,7 @@
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
 import com.localfeed.app.core.WeightedFeedEngine
+import com.localfeed.app.core.RandomPreferences
 import kotlin.random.Random
 
 fun rec(id: Long, liked: Boolean=false, fav: Boolean=false) = MediaRecord(
@@ -11,6 +12,7 @@ fun rec(id: Long, liked: Boolean=false, fav: Boolean=false) = MediaRecord(
 fun main() {
     val items = listOf(rec(1), rec(2, liked=true), rec(3, fav=true), rec(4, liked=true, fav=true), rec(5))
     val engine = WeightedFeedEngine(items, Random(20260906))
+    engine.setPreferences(RandomPreferences(liked = true, favorite = true))
     val counts = mutableMapOf<Long, Int>()
     var previous = -1L
     repeat(50000) {
@@ -24,6 +26,9 @@ fun main() {
     check(counts.getValue(4) > counts.getValue(1))
     check(counts.getValue(3) > counts.getValue(1))
     check(counts.getValue(4) < counts.getValue(1) * 1.8) { "preference bias became too strong for a random feed" }
+
+    val uniform = WeightedFeedEngine(items, Random(20260906))
+    check(items.all { uniform.weight(it) == 1.0 }) { "default feed must be uniform" }
 
     val grouped = WeightedFeedEngine(listOf(rec(10), rec(11), rec(20), rec(30)), Random(11))
     grouped.setContentGroups(mapOf(10L to 1L, 11L to 1L))

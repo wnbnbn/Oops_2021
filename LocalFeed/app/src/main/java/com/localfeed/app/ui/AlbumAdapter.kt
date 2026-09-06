@@ -36,6 +36,7 @@ class AlbumAdapter(
     private val selected = linkedSetOf<Long>()
     private val dayFormat = SimpleDateFormat("yyyy年M月d日", Locale.CHINA)
     private var cellSizePx: Int = 0
+    private var highlightedMediaId: Long? = null
 
     init { setHasStableIds(true) }
 
@@ -73,6 +74,14 @@ class AlbumAdapter(
         if (pos < 0) return
         rows = rows.toMutableList().also { it[pos] = Row.Media(record) }
         notifyItemChanged(pos, PAYLOAD_STATE)
+    }
+
+    fun highlightMedia(id: Long?) {
+        if (highlightedMediaId == id) return
+        val old = highlightedMediaId
+        highlightedMediaId = id
+        old?.let { adapterPositionForMediaId(it).takeIf { p -> p >= 0 }?.let { p -> notifyItemChanged(p, PAYLOAD_STATE) } }
+        id?.let { adapterPositionForMediaId(it).takeIf { p -> p >= 0 }?.let { p -> notifyItemChanged(p, PAYLOAD_STATE) } }
     }
 
     fun isSelectionMode(): Boolean = selected.isNotEmpty()
@@ -191,6 +200,7 @@ class AlbumAdapter(
             b.duration.visibility = if (item.kind == MediaKind.VIDEO) View.VISIBLE else View.GONE
             b.duration.text = formatDuration(item.durationMs)
             bindState(item)
+            b.currentBadge.visibility = if (item.id == highlightedMediaId) View.VISIBLE else View.GONE
             bindSelection(item.id in selected)
         }
 
@@ -200,6 +210,7 @@ class AlbumAdapter(
                 if (item.favorited) append("★")
             }
             b.stateBadge.visibility = if (b.stateBadge.text.isNullOrBlank()) View.GONE else View.VISIBLE
+            b.currentBadge.visibility = if (item.id == highlightedMediaId) View.VISIBLE else View.GONE
         }
 
         fun bindSelection(value: Boolean) {

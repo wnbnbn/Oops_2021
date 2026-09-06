@@ -6,6 +6,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.os.SystemClock
+import android.graphics.Rect
+import androidx.core.view.ViewCompat
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
@@ -24,9 +27,9 @@ class FeedAdapter(
 
     interface Callbacks {
         fun onToggleLike(position: Int)
+        fun onLikeFromGesture(position: Int)
         fun onToggleFavorite(position: Int)
         fun onMore(position: Int)
-        fun onAlbum(position: Int)
         fun onFullscreen(position: Int)
         fun onLandscapeBack(position: Int)
         fun onSingleTap(position: Int)
@@ -51,6 +54,20 @@ class FeedAdapter(
     var landscapeFeed: Boolean = false
         private set
     private var chromeVisible: Boolean = true
+    private var bottomSafeInsetPx: Int = 0
+    private var globalFillMode: Boolean = true
+
+    fun setGlobalFillMode(value: Boolean) {
+        if (globalFillMode == value) return
+        globalFillMode = value
+        refreshBoundLayouts()
+    }
+
+    fun setBottomSafeInset(value: Int) {
+        if (bottomSafeInsetPx == value) return
+        bottomSafeInsetPx = value.coerceAtLeast(0)
+        bound.values.forEach { it.get()?.applySafeInsets() }
+    }
 
     fun setChromeVisible(value: Boolean) {
         if (chromeVisible == value) return
@@ -128,6 +145,10 @@ class FeedAdapter(
         holder.binding.pauseBadge.visibility = if (isPlaying) View.GONE else View.VISIBLE
     }
 
+    fun showFirstFrame(mediaId: Long) {
+        bound[mediaId]?.get()?.binding?.imageView?.visibility = View.GONE
+    }
+
     fun cancelTransientGestures() {
         bound.values.forEach { it.get()?.cancelTransientGesture(clearLockedIndicator = true) }
     }
@@ -182,19 +203,28 @@ class FeedAdapter(
         private var longPressStartY = 0f
         private var longPressLocked = false
         private var lockedIndicatorVisible = false
+        private var cancelLockedGesture = false
+        private var suppressSingleTapUntil = 0L
 
         private val detector = GestureDetector(binding.root.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (SystemClock.uptimeMillis() < suppressSingleTapUntil) return true
                 safePosition()?.let(callbacks::onSingleTap)
                 return true
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 val p = safePosition() ?: return true
+                suppressSingleTapUntil = SystemClock.uptimeMillis() + 520L
                 animateLikeBurst()
-                callbacks.onToggleLike(p)
+                callbacks.onLikeFromGesture(p)
+                return true
+            }
+
+            override fun onDoubleTapEvent(e: MotionEvent): Boolean {
+                suppressSingleTapUntil = SystemClock.uptimeMillis() + 520L
                 return true
             }
 
@@ -202,12 +232,13 @@ class FeedAdapter(
                 val p = safePosition() ?: return
                 if (itemAt(p).kind == MediaKind.VIDEO && !scrubbing && !longPressed) {
                     longPressed = true
+                    cancelLockedGesture = lockedIndicatorVisible
                     longPressLocked = false
                     longPressStartY = e.y
                     binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(true)
-                    binding.speedBadge.text = "2.0× 快进中 · 下滑可锁定"
+                    binding.speedBadge.text = if (cancelLockedGesture) "2.0× 已锁定 · 下滑取消" else "2.0× 快进中 · 下滑可锁定"
                     binding.speedBadge.visibility = View.VISIBLE
-                    callbacks.onLongPressStart(p)
+                    if (!cancelLockedGesture) callbacks.onLongPressStart(p)
                 }
             }
         })
@@ -216,7 +247,6 @@ class FeedAdapter(
             binding.likeButton.setOnClickListener { safePosition()?.let(callbacks::onToggleLike) }
             binding.favoriteButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFavorite) }
             binding.moreButton.setOnClickListener { safePosition()?.let(callbacks::onMore) }
-            binding.albumButton.setOnClickListener { safePosition()?.let(callbacks::onAlbum) }
             binding.fullscreenButton.setOnClickListener { safePosition()?.let(callbacks::onFullscreen) }
             binding.landscapeBackButton.setOnClickListener { safePosition()?.let(callbacks::onLandscapeBack) }
             binding.speedBadge.setOnClickListener {
@@ -260,7 +290,18 @@ class FeedAdapter(
                     MotionEvent.ACTION_MOVE -> {
                         val dy = event.y - longPressStartY
                         val density = binding.root.resources.displayMetrics.density
-                        if (longPressed && !longPressLocked && dy > density * 88f) {
+                        if (longPressed && cancelLockedGesture && dy > density * 88f) {
+                            val p = safePosition()
+                            if (p != null) {
+                                cancelLockedGesture = false
+                                lockedIndicatorVisible = false
+                                longPressed = false
+                                binding.speedBadge.text = "2.0× 已取消"
+                                binding.speedBadge.postDelayed({ if (!lockedIndicatorVisible) binding.speedBadge.visibility = View.GONE }, 500L)
+                                binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(false)
+                                callbacks.onLockedSpeedCancel(p)
+                            }
+                        } else if (longPressed && !longPressLocked && dy > density * 88f) {
                             val p = safePosition()
                             if (p != null) {
                                 longPressLocked = true
@@ -313,8 +354,14 @@ class FeedAdapter(
                 return
             }
 
-            binding.imageView.visibility = View.GONE
+            // Adjacent ViewPager pages show a real frame while following the finger. The poster is
+            // underneath the transparent PlayerView and disappears only after the first decoded
+            // frame, avoiding the black gap that appeared during slow drags.
+            binding.imageView.resetZoom()
+            binding.imageView.visibility = View.VISIBLE
+            thumbnailLoader.load(item, binding.imageView, 1080)
             binding.playerView.visibility = View.VISIBLE
+            applySafeInsets()
             applyMediaLayout(item)
             applyChromeVisibility()
         }
@@ -339,28 +386,48 @@ class FeedAdapter(
 
             if (!landscapeFeed && landscape && item.aspectRatio() > 0f) {
                 binding.playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                binding.imageView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 val screenW = binding.root.resources.displayMetrics.widthPixels
                 val screenH = binding.root.resources.displayMetrics.heightPixels
                 val h = (screenW / item.aspectRatio()).roundToInt().coerceAtLeast(1)
                 val top = ((screenH - h) * 0.38f).roundToInt().coerceAtLeast(0)
                 binding.playerView.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = top }
+                binding.imageView.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = top }
                 binding.fullscreenButton.translationY = (top + h + 10).toFloat()
             } else {
                 // Landscape fullscreen is still the same mixed video feed. Portrait clips are fitted
                 // with side bars rather than being removed from the queue.
-                binding.playerView.resizeMode = if (landscapeFeed || landscape) {
+                val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
+                binding.playerView.resizeMode = if (landscapeFeed || landscape || !fill) {
                     AspectRatioFrameLayout.RESIZE_MODE_FIT
                 } else {
                     AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 }
                 binding.playerView.layoutParams = fullFrameParams()
+                binding.imageView.layoutParams = fullFrameParams()
+                binding.imageView.scaleType = if (landscapeFeed || landscape || !fill) android.widget.ImageView.ScaleType.FIT_CENTER else android.widget.ImageView.ScaleType.CENTER_CROP
                 binding.fullscreenButton.translationY = 0f
+            }
+        }
+
+        fun applySafeInsets() {
+            (binding.progress.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                if (lp.bottomMargin != bottomSafeInsetPx) {
+                    lp.bottomMargin = bottomSafeInsetPx
+                    binding.progress.layoutParams = lp
+                }
+            }
+            binding.progress.post {
+                ViewCompat.setSystemGestureExclusionRects(
+                    binding.progress,
+                    listOf(Rect(0, 0, binding.progress.width, binding.progress.height))
+                )
             }
         }
 
         fun applyChromeVisibility() {
             binding.rightActions.visibility = if (chromeVisible && !landscapeFeed) View.VISIBLE else View.GONE
-            binding.landscapeBackButton.visibility = if (chromeVisible && landscapeFeed) View.VISIBLE else View.GONE
+            binding.landscapeBackButton.visibility = if (landscapeFeed) View.VISIBLE else View.GONE
             binding.progress.visibility = if (chromeVisible && safePosition()?.let { itemAt(it).kind == MediaKind.VIDEO } == true) View.VISIBLE else View.GONE
             if (!chromeVisible) binding.fullscreenButton.visibility = View.GONE
             else safePosition()?.let { p -> applyMediaLayout(itemAt(p)) }
@@ -390,6 +457,12 @@ class FeedAdapter(
             if (!longPressed) return
             longPressed = false
             binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(false)
+            if (cancelLockedGesture) {
+                cancelLockedGesture = false
+                binding.speedBadge.text = "2.0× 已锁定 · 再次长按下滑取消"
+                binding.speedBadge.visibility = View.VISIBLE
+                return
+            }
             if (!longPressLocked) {
                 binding.speedBadge.visibility = View.GONE
                 callbacks.onLongPressEnd(safePosition() ?: -1)

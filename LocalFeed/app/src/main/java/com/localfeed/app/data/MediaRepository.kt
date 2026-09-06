@@ -9,6 +9,19 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
+data class ScanSummary(
+    val discovered: Int,
+    val newFiles: Int,
+    val updatedFiles: Int,
+    val unchangedFiles: Int,
+    val metadataQueued: Int,
+    val indexErrors: Int,
+    val metadataErrors: Int = 0,
+    val newFileErrors: Int = 0,
+    val newNames: List<String> = emptyList(),
+    val authorizationNeeded: Int = 0
+)
+
 class MediaRepository(private val context: Context) {
     private val db = MediaIndexDb(context)
     private val indexIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-index-io") }
@@ -17,13 +30,14 @@ class MediaRepository(private val context: Context) {
     private val generation = AtomicInteger(0)
     private val trashManager = TrashManager(context, db)
     private val duplicateScanner = DuplicateScanner(context, db)
-    private val similarVideoScanner = SimilarVideoScanner(context, db)
 
     fun allMedia(): List<MediaRecord> = db.allVisible()
     fun trashedMedia(): List<MediaRecord> = db.allTrashed()
     fun folderUris(): List<String> = db.folderUris()
     fun folderInfos(): List<FolderInfo> = db.folderInfos()
     fun problems(): List<ProblemMedia> = db.problems()
+    fun mediaByUri(uri: String): com.localfeed.app.core.MediaRecord? = db.recordByUri(uri)
+    fun clearProblem(uri: String) = indexIo.execute { db.clearError(uri) }
     fun originalRelativePath(id: Long): String = db.originalRelativePath(id)
 
     fun addFolder(treeUri: Uri): Boolean {
@@ -105,8 +119,8 @@ class MediaRepository(private val context: Context) {
      */
     fun scanAll(
         onProgress: (String) -> Unit,
-        onIndexed: (List<MediaRecord>, Int) -> Unit,
-        onMetadataDone: (List<MediaRecord>, Int) -> Unit
+        onIndexed: (List<MediaRecord>, ScanSummary) -> Unit,
+        onMetadataDone: (List<MediaRecord>, ScanSummary) -> Unit
     ) {
         val run = generation.incrementAndGet()
         indexIo.execute {
@@ -125,6 +139,11 @@ class MediaRepository(private val context: Context) {
             }
             val allTasks = ArrayList<TreeScanner.MetadataTask>(1024)
             var totalErrors = 0
+            var totalDiscovered = 0
+            var totalNew = 0
+            var totalUpdated = 0
+            var totalUnchanged = 0
+            val newNames = ArrayList<String>()
             roots.forEachIndexed { rootZero, value ->
                 if (run != generation.get()) return@execute
                 val scanner = TreeScanner(context, db)
@@ -133,18 +152,33 @@ class MediaRepository(private val context: Context) {
                 }
                 allTasks += result.metadataTasks
                 totalErrors += result.errors
-                onProgress("目录 ${rootZero + 1}/${roots.size} · ${result.discovered} 个媒体 · 索引错误 ${result.errors}")
+                totalDiscovered += result.discovered
+                totalNew += result.newFiles
+                totalUpdated += result.updatedFiles
+                totalUnchanged += result.unchangedFiles
+                if (newNames.size < 100) newNames += result.newNames.take(100 - newNames.size)
+                onProgress("目录 ${rootZero + 1}/${roots.size} · ${result.discovered} 项 · 新增 ${result.newFiles} · 更新 ${result.updatedFiles} · 失败 ${result.errors}")
             }
             if (run != generation.get()) return@execute
-            onIndexed(db.allVisible(), allTasks.size)
+            val indexedSummary = ScanSummary(
+                discovered = totalDiscovered,
+                newFiles = totalNew,
+                updatedFiles = totalUpdated,
+                unchangedFiles = totalUnchanged,
+                metadataQueued = allTasks.size,
+                indexErrors = totalErrors,
+                newNames = newNames,
+                authorizationNeeded = authorizationNeeded
+            )
+            onIndexed(db.allVisible(), indexedSummary)
 
             metadataIo.execute {
                 if (run != generation.get()) return@execute
                 val scanner = TreeScanner(context, db)
-                val metaErrors = scanner.enrichMetadata(allTasks) { done, total ->
+                val meta = scanner.enrichMetadata(allTasks) { done, total ->
                     if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
                 }
-                if (run == generation.get()) onMetadataDone(db.allVisible(), totalErrors + metaErrors)
+                if (run == generation.get()) onMetadataDone(db.allVisible(), indexedSummary.copy(metadataErrors = meta.errors, newFileErrors = meta.newFileErrors))
             }
         }
     }
@@ -158,32 +192,6 @@ class MediaRepository(private val context: Context) {
             }
             onDone(groups)
         }
-    }
-
-    fun scanSimilarVideos(onProgress: (String) -> Unit, onDone: (SimilarVideoScanResult) -> Unit) {
-        val snapshot = db.allVisible().filter { it.kind == com.localfeed.app.core.MediaKind.VIDEO }
-        utilityIo.execute {
-            val result = runCatching { similarVideoScanner.scan(snapshot, onProgress) }.getOrElse {
-                onProgress("相似视频扫描失败 · ${it.message ?: it.javaClass.simpleName}")
-                SimilarVideoScanResult(emptyList(), emptyList(), 0, snapshot.size)
-            }
-            onDone(result)
-        }
-    }
-
-    fun findSimilarVideos(record: com.localfeed.app.core.MediaRecord, onProgress: (String) -> Unit, onDone: (List<SimilarVideoPair>) -> Unit) {
-        val snapshot = db.allVisible().filter { it.kind == com.localfeed.app.core.MediaKind.VIDEO }
-        utilityIo.execute {
-            val result = runCatching { similarVideoScanner.findSimilar(record, snapshot, onProgress) }.getOrElse {
-                onProgress("查找相似失败 · ${it.message ?: it.javaClass.simpleName}")
-                emptyList()
-            }
-            onDone(result)
-        }
-    }
-
-    fun markNotSimilar(firstId: Long, secondId: Long) = utilityIo.execute {
-        similarVideoScanner.markNotDuplicate(firstId, secondId)
     }
 
     fun moveToTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = utilityIo.execute {
@@ -202,6 +210,9 @@ class MediaRepository(private val context: Context) {
     fun setLikedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setLikedMany(ids, value) }
     fun setFavorited(id: Long, value: Boolean) = indexIo.execute { db.setFavorited(id, value) }
     fun setFavoritedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setFavoritedMany(ids, value) }
+    fun setPlaybackPosition(id: Long, value: Long) = indexIo.execute { db.setPlaybackPosition(id, value) }
+    fun setFitMode(id: Long, value: Int) = indexIo.execute { db.setFitMode(id, value) }
+    fun mergeDuplicateState(keepId: Long, removedIds: Collection<Long>) = indexIo.execute { db.mergeDuplicateState(keepId, removedIds) }
     fun markShown(id: Long) = indexIo.execute { db.markShown(id) }
     fun hide(id: Long) = indexIo.execute { db.hide(id) }
     fun hideMany(ids: Collection<Long>) = indexIo.execute { db.hideMany(ids) }

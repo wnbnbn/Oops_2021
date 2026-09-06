@@ -20,6 +20,9 @@ data class MediaRecord(
     val favorited: Boolean = false,
     val lastShownAt: Long = 0L,
     val showCount: Int = 0,
+    val playbackPositionMs: Long = 0L,
+    /** 0 follows the global setting, 1 fills/crops, 2 shows the complete frame. */
+    val fitMode: Int = 0,
     val hidden: Boolean = false,
     val addedAt: Long = System.currentTimeMillis(),
     val trashedAt: Long = 0L

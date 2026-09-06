@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
@@ -21,6 +22,7 @@ class PlaybackCoordinator(context: Context) {
     interface Listener {
         fun onProgress(mediaId: Long, positionMs: Long, durationMs: Long)
         fun onPlayingChanged(mediaId: Long, isPlaying: Boolean)
+        fun onFirstFrame(mediaId: Long)
         fun onPlaybackError(mediaId: Long, message: String)
         fun onPlaybackEnded(mediaId: Long)
     }
@@ -87,6 +89,10 @@ class PlaybackCoordinator(context: Context) {
                 val id = currentRecordId
                 if (id >= 0) listener?.onPlaybackError(id, error.errorCodeName)
             }
+
+            override fun onRenderedFirstFrame() {
+                if (currentRecordId >= 0) listener?.onFirstFrame(currentRecordId)
+            }
         })
         mainHandler.post(progressTick)
     }
@@ -121,7 +127,7 @@ class PlaybackCoordinator(context: Context) {
      * One player is reused for all pages. The target view is switched immediately and no poster
      * layer is inserted between pages, matching the simpler v0.1 playback path.
      */
-    fun play(record: MediaRecord, feedIndex: Int, view: PlayerView) {
+    fun play(record: MediaRecord, feedIndex: Int, view: PlayerView, resumePositionMs: Long = 0L) {
         if (record.kind != MediaKind.VIDEO) {
             pauseAndDetach()
             return
@@ -141,6 +147,9 @@ class PlaybackCoordinator(context: Context) {
             val source = preloadManager.getMediaSource(item)
             if (source != null) player.setMediaSource(source) else player.setMediaItem(item)
             player.prepare()
+            if (resumePositionMs > 0L && (record.durationMs <= 0L || resumePositionMs < record.durationMs - 2_000L)) {
+                player.seekTo(resumePositionMs)
+            }
             applyEffectiveSpeed()
         }
         player.play()
@@ -241,7 +250,9 @@ class PlaybackCoordinator(context: Context) {
     }
 
     private fun applyEffectiveSpeed() {
-        player.setPlaybackSpeed(if (temporary2x || locked2x) 2f else userSpeed)
+        val speed = if (temporary2x || locked2x) 2f else userSpeed
+        // Explicit unit pitch keeps voices intelligible when speed changes.
+        player.playbackParameters = PlaybackParameters(speed, 1f)
     }
 
     private fun attachTo(view: PlayerView) {

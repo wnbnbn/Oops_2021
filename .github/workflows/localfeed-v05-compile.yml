@@ -1,4 +1,4 @@
-name: LocalFeed v0.5 Compile
+name: LocalFeed v0.6 Compile
 
 on:
   push:
@@ -31,18 +31,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Verify tracked v0.5 source
+      - name: Verify tracked v0.6 source
         run: python3 localfeed_ci/verify_v05_source.py
       - name: Pure Kotlin regression tests
         working-directory: LocalFeed
         run: bash tools/run-smoke-tests.sh
-      - name: Assemble v0.5
+      - name: Assemble v0.6
         working-directory: LocalFeed
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - name: Re-sign APK with fixed key
         run: |
           IN=LocalFeed/app/build/outputs/apk/debug/app-debug.apk
-          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.5.1-fixed-signature.apk
+          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.6.0-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks "$HOME/.android/debug.keystore" \
             --ks-key-alias androiddebugkey \
@@ -52,7 +52,7 @@ jobs:
             "$IN"
       - name: Verify fixed certificate
         run: |
-          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.5.1-fixed-signature.apk
+          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.6.0-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
           ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
           EXPECTED=2fcf7ed9c4823aa9589c53102b559de274b7ab84f636ded79957aa88746ab7a6
@@ -61,13 +61,13 @@ jobs:
       - name: Package verified deliverables
         run: |
           mkdir -p dist
-          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.5.1-fixed-signature.apk dist/LocalFeed-v0.5.1.apk
-          sha256sum dist/LocalFeed-v0.5.1.apk > dist/SHA256SUMS.txt
+          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.6.0-fixed-signature.apk dist/LocalFeed-v0.6.0.apk
+          sha256sum dist/LocalFeed-v0.6.0.apk > dist/SHA256SUMS.txt
           {
-            echo "LocalFeed v0.5.1 / versionCode 6"
+            echo "LocalFeed v0.6.0 / versionCode 7"
             echo "Source commit: $GITHUB_SHA"
             echo "CI run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "Source integrity, Random Feed V2, FeedSession, AlbumQuery, Scanner cached-signature smoke: PASS"
+            echo "Source integrity, uniform/optional-bias feed, FeedSession, AlbumQuery, scanner smoke: PASS"
             echo "Android :app:assembleDebug: PASS"
             echo "Fixed certificate SHA256: 2fcf7ed9c4823aa9589c53102b559de274b7ab84f636ded79957aa88746ab7a6 (verified)"
             echo "OnePlus Ace 6 visual/decoder/performance acceptance: NOT RUN"
@@ -77,13 +77,13 @@ jobs:
           import json, zipfile
           paths = list(json.loads(Path('localfeed_ci/v05_source_sha256.json').read_text()))
           paths += ['localfeed_ci/v05_source_sha256.json', 'localfeed_ci/verify_v05_source.py', 'localfeed_ci/stable_debug_keystore.b64', '.github/workflows/localfeed-v05-compile.yml']
-          with zipfile.ZipFile('dist/LocalFeed-v0.5.1-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+          with zipfile.ZipFile('dist/LocalFeed-v0.6.0-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
               for name in paths: archive.write(name, name)
               archive.write('dist/BUILD_REPORT.txt', 'BUILD_REPORT.txt')
           PYZIP
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.5.1-fixed-signature-apk
+          name: LocalFeed-v0.6.0-fixed-signature-apk
           path: dist/*
           if-no-files-found: error

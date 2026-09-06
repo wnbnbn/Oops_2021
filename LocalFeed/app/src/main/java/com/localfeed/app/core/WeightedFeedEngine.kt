@@ -2,6 +2,12 @@ package com.localfeed.app.core
 
 import kotlin.random.Random
 
+data class RandomPreferences(
+    val liked: Boolean = false,
+    val favorite: Boolean = false,
+    val unseen: Boolean = false
+)
+
 /**
  * LocalFeed random feed V2.
  *
@@ -21,6 +27,11 @@ class WeightedFeedEngine(
 ) {
     private var lastPickedId: Long? = null
     private var contentGroupByMediaId: Map<Long, Long> = emptyMap()
+    private var preferences = RandomPreferences()
+
+    fun setPreferences(value: RandomPreferences) {
+        preferences = value
+    }
 
     fun replaceSource(newSource: List<MediaRecord>) {
         source = newSource.filterNot { it.hidden }
@@ -81,10 +92,11 @@ class WeightedFeedEngine(
      * Preference is intentionally mild: random selection must remain the dominant experience.
      * Show count and viewing duration are not used as negative feedback.
      */
-    fun weight(item: MediaRecord): Double = when {
-        item.liked && item.favorited -> 1.45
-        item.favorited -> 1.30
-        item.liked -> 1.15
-        else -> 1.0
+    fun weight(item: MediaRecord): Double {
+        var value = 1.0
+        if (preferences.liked && item.liked) value *= 1.10
+        if (preferences.favorite && item.favorited) value *= 1.15
+        if (preferences.unseen && item.lastShownAt <= 0L) value *= 1.10
+        return value.coerceAtMost(1.35)
     }
 }

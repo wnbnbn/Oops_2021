@@ -23,10 +23,13 @@ app/src/main/java/com/localfeed/app/ui/AlbumAdapter.kt
 app/src/main/java/com/localfeed/app/ui/AlbumDragSelectTouchListener.kt
 app/src/main/java/com/localfeed/app/ui/AlbumPinchGridTouchListener.kt
 app/src/main/java/com/localfeed/app/ui/AlbumQuery.kt
+app/src/main/java/com/localfeed/app/ui/ComicReaderAdapter.kt
 app/src/main/java/com/localfeed/app/ui/FeedProgressView.kt
 app/src/main/java/com/localfeed/app/ui/ZoomImageView.kt
 app/src/main/res/drawable/chip_bg.xml
 app/src/main/res/drawable/ic_album.xml
+app/src/main/res/drawable/ic_back.xml
+app/src/main/res/drawable/ic_fullscreen.xml
 app/src/main/res/drawable/ic_heart_filled.xml
 app/src/main/res/drawable/ic_heart_outline.xml
 app/src/main/res/drawable/ic_more.xml

@@ -171,7 +171,17 @@
         android:background="@android:color/black"
         android:visibility="gone">
         <com.localfeed.app.ui.ZoomImageView android:id="@+id/imageViewerImage" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="image viewer" android:scaleType="fitCenter" />
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/comicReader"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:clipToPadding="false"
+            android:paddingTop="56dp"
+            android:paddingBottom="28dp"
+            android:visibility="gone" />
         <TextView android:id="@+id/imageViewerBack" android:layout_width="52dp" android:layout_height="52dp" android:layout_gravity="start|top" android:gravity="center" android:text="‹" android:textColor="@android:color/white" android:textSize="40sp" />
+        <TextView android:id="@+id/imageViewerMode" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="10dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:paddingStart="13dp" android:paddingEnd="13dp" android:text="连续阅读" android:textColor="@android:color/white" android:textSize="13sp" />
         <TextView android:id="@+id/imageViewerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="start|bottom" android:layout_marginStart="14dp" android:layout_marginEnd="14dp" android:layout_marginBottom="18dp" android:ellipsize="middle" android:maxLines="1" android:textColor="#D9FFFFFF" android:textSize="13sp" />
     </FrameLayout>
 

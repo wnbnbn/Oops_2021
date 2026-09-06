@@ -20,13 +20,19 @@ class TreeScanner(
     private val context: Context,
     private val db: MediaIndexDb
 ) {
-    data class MetadataTask(val uri: Uri, val kind: MediaKind, val name: String)
+    data class MetadataTask(val uri: Uri, val kind: MediaKind, val name: String, val isNew: Boolean)
     data class BasicResult(
         val discovered: Int,
         val indexed: Int,
+        val newFiles: Int,
+        val updatedFiles: Int,
+        val unchangedFiles: Int,
+        val newNames: List<String>,
         val metadataTasks: List<MetadataTask>,
         val errors: Int
     )
+
+    data class MetadataResult(val errors: Int, val newFileErrors: Int)
 
     private data class PendingDir(val documentId: String, val relativeDir: String)
 
@@ -37,6 +43,10 @@ class TreeScanner(
         val tasks = ArrayList<MetadataTask>(512)
         var discovered = 0
         var indexed = 0
+        var newFiles = 0
+        var updatedFiles = 0
+        var unchangedFiles = 0
+        val newNames = ArrayList<String>()
         var errors = 0
         val scanToken = System.currentTimeMillis() * 1000L + (System.nanoTime() and 0x3FFL)
 
@@ -88,8 +98,14 @@ class TreeScanner(
                             size = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else 0L,
                             modifiedAt = if (modifiedCol >= 0 && !cursor.isNull(modifiedCol)) cursor.getLong(modifiedCol) else 0L
                         )
-                        if (db.upsertBasic(record, scanToken) >= 0) indexed++
-                        tasks += MetadataTask(fileUri, kind, name)
+                        val outcome = db.upsertBasic(record, scanToken)
+                        if (outcome.id >= 0) indexed++
+                        when {
+                            outcome.isNew -> { newFiles++; if (newNames.size < 100) newNames += relativePath }
+                            outcome.contentChanged -> updatedFiles++
+                            else -> unchangedFiles++
+                        }
+                        if (outcome.metadataNeeded) tasks += MetadataTask(fileUri, kind, name, outcome.isNew)
                         if (discovered % 100 == 0) onProgress(discovered)
                     }
                 }
@@ -101,12 +117,13 @@ class TreeScanner(
 
         if (errors == 0) db.pruneRootNotSeen(treeUri.toString(), scanToken)
         db.updateFolderScan(treeUri.toString())
-        return BasicResult(discovered, indexed, tasks, errors)
+        return BasicResult(discovered, indexed, newFiles, updatedFiles, unchangedFiles, newNames, tasks, errors)
     }
 
-    fun enrichMetadata(tasks: List<MetadataTask>, onProgress: (Int, Int) -> Unit = { _, _ -> }): Int {
+    fun enrichMetadata(tasks: List<MetadataTask>, onProgress: (Int, Int) -> Unit = { _, _ -> }): MetadataResult {
         val resolver = context.contentResolver
         var errors = 0
+        var newFileErrors = 0
         tasks.forEachIndexed { index, task ->
             try {
                 val meta = if (task.kind == MediaKind.VIDEO) videoMetadata(task.uri) else imageMetadata(resolver, task.uri)
@@ -114,11 +131,12 @@ class TreeScanner(
                 db.clearError(task.uri.toString())
             } catch (e: Exception) {
                 errors++
+                if (task.isNew) newFileErrors++
                 db.recordError(task.uri.toString(), task.name, "元数据", e.javaClass.simpleName + ": " + (e.message ?: "读取失败"))
             }
             if ((index + 1) % 25 == 0 || index == tasks.lastIndex) onProgress(index + 1, tasks.size)
         }
-        return errors
+        return MetadataResult(errors, newFileErrors)
     }
 
     private data class Meta(val durationMs: Long, val width: Int, val height: Int, val rotation: Int)

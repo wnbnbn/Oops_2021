@@ -42,7 +42,14 @@ data class VisualHashState(
     val modifiedAt: Long
 )
 
-class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 6) {
+data class UpsertOutcome(
+    val id: Long,
+    val isNew: Boolean,
+    val contentChanged: Boolean,
+    val metadataNeeded: Boolean
+)
+
+class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 7) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -64,6 +71,8 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
                 favorited INTEGER NOT NULL DEFAULT 0,
                 last_shown_at INTEGER NOT NULL DEFAULT 0,
                 show_count INTEGER NOT NULL DEFAULT 0,
+                playback_position_ms INTEGER NOT NULL DEFAULT 0,
+                fit_mode INTEGER NOT NULL DEFAULT 0,
                 hidden INTEGER NOT NULL DEFAULT 0,
                 last_seen_token INTEGER NOT NULL DEFAULT 0,
                 added_at INTEGER NOT NULL,
@@ -174,6 +183,11 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
             db.execSQL("CREATE INDEX IF NOT EXISTS media_size_idx ON media(size DESC)")
             db.execSQL("CREATE INDEX IF NOT EXISTS media_last_shown_idx ON media(last_shown_at DESC)")
         }
+        if (oldVersion < 7) {
+            db.execSQL("ALTER TABLE media ADD COLUMN playback_position_ms INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE media ADD COLUMN fit_mode INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("DELETE FROM media_errors WHERE stage='相似扫描'")
+        }
     }
 
     fun addFolder(rootUri: String, displayName: String, noMediaCreated: Boolean) {
@@ -252,13 +266,13 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         writableDatabase.update("folders", cv, "root_uri=?", arrayOf(rootUri))
     }
 
-    fun upsertBasic(record: MediaRecord, scanToken: Long): Long {
+    fun upsertBasic(record: MediaRecord, scanToken: Long): UpsertOutcome {
         val old = readableDatabase.rawQuery(
-            "SELECT id,size,modified_at FROM media WHERE uri=?", arrayOf(record.uri)
+            "SELECT id,size,modified_at,width,height FROM media WHERE uri=?", arrayOf(record.uri)
         ).use { c ->
-            if (c.moveToFirst()) Triple(c.getLong(0), c.getLong(1), c.getLong(2)) else null
+            if (c.moveToFirst()) longArrayOf(c.getLong(0), c.getLong(1), c.getLong(2), c.getLong(3), c.getLong(4)) else null
         }
-        val changedContent = old != null && (old.second != record.size || old.third != record.modifiedAt)
+        val changedContent = old != null && (old[1] != record.size || old[2] != record.modifiedAt)
         val update = ContentValues().apply {
             put("root_uri", record.rootUri)
             put("relative_path", record.relativePath)
@@ -288,9 +302,15 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
             }
             writableDatabase.insert("media", null, insert)
         }
-        return old?.first ?: readableDatabase.rawQuery("SELECT id FROM media WHERE uri=?", arrayOf(record.uri)).use { c ->
+        val id = old?.get(0) ?: readableDatabase.rawQuery("SELECT id FROM media WHERE uri=?", arrayOf(record.uri)).use { c ->
             if (c.moveToFirst()) c.getLong(0) else -1L
         }
+        return UpsertOutcome(
+            id = id,
+            isNew = old == null,
+            contentChanged = changedContent,
+            metadataNeeded = old == null || changedContent || old[3] <= 0L || old[4] <= 0L
+        )
     }
 
     fun pruneRootNotSeen(rootUri: String, scanToken: Long): Int {
@@ -336,6 +356,34 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
     }
 
     fun setFavoritedMany(ids: Collection<Long>, favorited: Boolean) = updateMany(ids, "favorited", if (favorited) 1 else 0)
+
+    fun setPlaybackPosition(id: Long, positionMs: Long) {
+        val cv = ContentValues().apply { put("playback_position_ms", positionMs.coerceAtLeast(0L)) }
+        writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
+    }
+
+    fun setFitMode(id: Long, mode: Int) {
+        val cv = ContentValues().apply { put("fit_mode", mode.coerceIn(0, 2)) }
+        writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
+    }
+
+    fun mergeDuplicateState(keepId: Long, removedIds: Collection<Long>) {
+        if (removedIds.isEmpty()) return
+        val allIds = (removedIds + keepId).distinct()
+        val marks = allIds.joinToString(",") { "?" }
+        val args = allIds.map { it.toString() }.toTypedArray()
+        readableDatabase.rawQuery(
+            "SELECT MAX(liked),MAX(favorited),MAX(last_shown_at),SUM(show_count),MAX(playback_position_ms) FROM media WHERE id IN ($marks)",
+            args
+        ).use { c ->
+            if (!c.moveToFirst()) return
+            val cv = ContentValues().apply {
+                put("liked", c.getInt(0)); put("favorited", c.getInt(1)); put("last_shown_at", c.getLong(2))
+                put("show_count", c.getInt(3)); put("playback_position_ms", c.getLong(4))
+            }
+            writableDatabase.update("media", cv, "id=?", arrayOf(keepId.toString()))
+        }
+    }
 
     fun markShown(id: Long) {
         writableDatabase.execSQL(
@@ -457,6 +505,10 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         writableDatabase.delete("media_errors", "uri=?", arrayOf(uri))
     }
 
+    fun recordByUri(uri: String): MediaRecord? = readableDatabase.rawQuery(
+        "SELECT * FROM media WHERE uri=?", arrayOf(uri)
+    ).use { c -> readAll(c).firstOrNull() }
+
     fun problems(): List<ProblemMedia> = readableDatabase.rawQuery(
         "SELECT uri,name,stage,message,updated_at FROM media_errors ORDER BY updated_at DESC", null
     ).use { c ->
@@ -496,6 +548,8 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
                 favorited = c.getInt(idx.getValue("favorited")) != 0,
                 lastShownAt = c.getLong(idx.getValue("last_shown_at")),
                 showCount = c.getInt(idx.getValue("show_count")),
+                playbackPositionMs = c.getLong(idx.getValue("playback_position_ms")),
+                fitMode = c.getInt(idx.getValue("fit_mode")),
                 hidden = c.getInt(idx.getValue("hidden")) != 0,
                 addedAt = c.getLong(idx.getValue("added_at")),
                 trashedAt = c.getLong(idx.getValue("trashed_at"))

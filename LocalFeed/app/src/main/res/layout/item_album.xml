@@ -58,4 +58,21 @@
         android:paddingEnd="5dp"
         android:textColor="@android:color/white"
         android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/currentBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|bottom"
+        android:layout_margin="6dp"
+        android:background="@drawable/pill_bg"
+        android:paddingStart="7dp"
+        android:paddingEnd="7dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:text="当前"
+        android:textColor="@android:color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
 </FrameLayout>

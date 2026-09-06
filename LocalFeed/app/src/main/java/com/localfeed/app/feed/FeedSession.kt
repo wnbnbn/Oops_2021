@@ -3,6 +3,7 @@ package com.localfeed.app.feed
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
 import com.localfeed.app.core.WeightedFeedEngine
+import com.localfeed.app.core.RandomPreferences
 
 /**
  * Runtime queue for the short-video feed.
@@ -55,6 +56,10 @@ class FeedSession(source: List<MediaRecord>) {
 
     fun setContentGroups(groups: Map<Long, Long>) {
         engine.setContentGroups(groups)
+    }
+
+    fun setRandomPreferences(value: RandomPreferences) {
+        engine.setPreferences(value)
     }
 
     private fun append(count: Int) {
