@@ -73,7 +73,7 @@ jobs:
           assert len(clean) == 22816, f'unexpected patch base64 length: {len(clean)}'
           data = gzip.decompress(base64.b64decode(clean, validate=False))
           Path('/tmp/localfeed-v03.patch').write_bytes(data)
-          print('patch bytes', len(data))
+          print('v0.3 patch bytes', len(data))
           PY
           cd /tmp/localfeed/LocalFeed_v0.2
           patch -p1 < /tmp/localfeed-v03.patch
@@ -81,7 +81,30 @@ jobs:
           grep -q 'compileSdk = 36' app/build.gradle.kts
           grep -q 'androidx.core:core-ktx:1.17.0' app/build.gradle.kts
 
-      - name: Build v0.3 stable-signed debug APK
+      - name: Apply v0.4 P1 patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, re, hashlib
+          names = ['v04_patch_00.b64','v04_patch_01.b64','v04_patch_02.b64','v04_patch_03.b64']
+          raw = b''.join((Path('localfeed_ci') / name).read_bytes() for name in names)
+          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
+          assert len(clean) == 47464, f'unexpected v0.4 patch base64 length: {len(clean)}'
+          data = gzip.decompress(base64.b64decode(clean, validate=False))
+          assert hashlib.sha256(data).hexdigest() == 'b7c46070d1da311ce736a76b321233ce06f4cd9393cb9ef575643bc3e78b9bf3'
+          Path('/tmp/localfeed-v04.patch').write_bytes(data)
+          print('v0.4 patch bytes', len(data))
+          PY
+          cd /tmp/localfeed/LocalFeed_v0.2
+          patch -p1 < /tmp/localfeed-v04.patch
+          sed -i 's/versionCode = 3/versionCode = 4/' app/build.gradle.kts
+          sed -i 's/versionName = "0.3.0"/versionName = "0.4.0"/' app/build.gradle.kts
+          grep -q 'versionCode = 4' app/build.gradle.kts
+          grep -q 'versionName = "0.4.0"' app/build.gradle.kts
+          grep -q 'class DuplicateScanner' app/src/main/java/com/localfeed/app/data/DuplicateScanner.kt
+          grep -q 'class AlbumDragSelectTouchListener' app/src/main/java/com/localfeed/app/ui/AlbumDragSelectTouchListener.kt
+
+      - name: Build v0.4 stable-signed debug APK
         working-directory: /tmp/localfeed/LocalFeed_v0.2
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
@@ -89,9 +112,9 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload v0.3 stable-signed debug APK
+      - name: Upload v0.4 stable-signed debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.3-stable-signed-debug-apk
+          name: LocalFeed-v0.4-stable-signed-debug-apk
           path: /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
