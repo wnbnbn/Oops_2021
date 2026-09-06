@@ -133,6 +133,8 @@ class AlbumAdapter(
 
     fun mediaById(id: Long): MediaRecord? = rows.asSequence().mapNotNull { (it as? Row.Media)?.record }.firstOrNull { it.id == id }
 
+    fun adapterPositionForMediaId(id: Long): Int = rows.indexOfFirst { it is Row.Media && it.record.id == id }
+
     fun allVisibleMedia(): List<MediaRecord> = rows.mapNotNull { (it as? Row.Media)?.record }
 
     fun isHeader(position: Int): Boolean = rows.getOrNull(position) is Row.Header

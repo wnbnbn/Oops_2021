@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -51,11 +50,10 @@ class PlaybackCoordinator(context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var currentView: PlayerView? = null
-    private var currentPoster: View? = null
     private var currentRecordId: Long = -1L
     private var currentFeedIndex = 0
-    private var awaitingFirstFrameMediaId: Long? = null
     private val mapped = HashMap<Long, MediaItem>()
+    private var mappedVideoIds = emptyList<Long>()
     private var released = false
 
     /** User-selected persistent speed. Temporary hold-to-2x never mutates this value. */
@@ -77,21 +75,6 @@ class PlaybackCoordinator(context: Context) {
 
     init {
         player.addListener(object : Player.Listener {
-            override fun onRenderedFirstFrame() {
-                // switchTargetView() can emit a first-frame callback for the *previous* media while
-                // the new page is already waiting behind its poster. Hiding that new poster on the
-                // stale callback creates a very visible black/old-frame flash on page changes.
-                val expectedId = awaitingFirstFrameMediaId ?: return
-                if (player.currentMediaItem?.mediaId != expectedId.toString()) return
-                val poster = currentPoster ?: return
-                awaitingFirstFrameMediaId = null
-                poster.animate().cancel()
-                // SurfaceView + alpha cross-fade is visibly unstable on some ColorOS devices.
-                // The poster is an exact transition shield; drop it only after the correct frame.
-                poster.alpha = 1f
-                poster.visibility = View.GONE
-            }
-
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (currentRecordId >= 0) listener?.onPlayingChanged(currentRecordId, isPlaying)
             }
@@ -109,48 +92,43 @@ class PlaybackCoordinator(context: Context) {
     }
 
     fun updateQueue(queue: List<MediaRecord>) {
-        preloadManager.reset()
-        mapped.clear()
-        val items = mutableListOf<MediaItem>()
-        val ranking = mutableListOf<Int>()
-        queue.forEachIndexed { index, record ->
-            if (record.kind == MediaKind.VIDEO) {
-                val item = mediaItem(record)
-                mapped[record.id] = item
-                items += item
-                ranking += index
-            }
+        val videos = queue.mapIndexedNotNull { index, record ->
+            if (record.kind == MediaKind.VIDEO) index to record else null
         }
-        if (items.isNotEmpty()) preloadManager.addMediaItems(items, ranking)
+        val nextIds = videos.map { it.second.id }
+        val appendOnly = nextIds.size >= mappedVideoIds.size &&
+            nextIds.take(mappedVideoIds.size) == mappedVideoIds
+
+        if (!appendOnly) {
+            preloadManager.reset()
+            mapped.clear()
+            mappedVideoIds = emptyList()
+        }
+
+        val newVideos = if (appendOnly) videos.drop(mappedVideoIds.size) else videos
+        if (newVideos.isNotEmpty()) {
+            val items = newVideos.map { (_, record) ->
+                mediaItem(record).also { mapped[record.id] = it }
+            }
+            preloadManager.addMediaItems(items, newVideos.map { it.first })
+        }
+        mappedVideoIds = nextIds
         preloadManager.setCurrentPlayingIndex(currentFeedIndex)
         preloadManager.invalidate()
     }
 
     /**
-     * One player is reused for all pages. Portrait/landscape layout changes keep the same player,
-     * MediaItem and position. A new item keeps its poster until onRenderedFirstFrame().
+     * One player is reused for all pages. The target view is switched immediately and no poster
+     * layer is inserted between pages, matching the simpler v0.1 playback path.
      */
-    fun play(record: MediaRecord, feedIndex: Int, view: PlayerView, poster: View?) {
+    fun play(record: MediaRecord, feedIndex: Int, view: PlayerView) {
         if (record.kind != MediaKind.VIDEO) {
             pauseAndDetach()
             return
         }
 
         val changingMedia = currentRecordId != record.id || player.currentMediaItem?.mediaId != record.id.toString()
-        val switchingView = currentView !== view
         if (changingMedia) cancelTemporaryBoost()
-
-        // Arm the poster before switching Surface targets. This is important because the target
-        // switch itself may render one last frame from the old MediaItem.
-        currentPoster = poster
-        if (changingMedia || switchingView) {
-            awaitingFirstFrameMediaId = record.id
-            poster?.apply {
-                animate().cancel()
-                alpha = 1f
-                visibility = View.VISIBLE
-            }
-        }
         attachTo(view)
         currentFeedIndex = feedIndex
         target.current = feedIndex
@@ -206,6 +184,13 @@ class PlaybackCoordinator(context: Context) {
         applyEffectiveSpeed()
     }
 
+    fun unlock2xToTemporary() {
+        if (!locked2x) return
+        locked2x = false
+        temporary2x = true
+        applyEffectiveSpeed()
+    }
+
     fun clearLocked2x() {
         if (!locked2x) return
         locked2x = false
@@ -238,21 +223,11 @@ class PlaybackCoordinator(context: Context) {
         player.pause()
         currentView?.player = null
         currentView = null
-        currentPoster = null
-        awaitingFirstFrameMediaId = null
     }
 
     fun pauseOnly() {
         cancelTemporaryBoost()
         player.pause()
-    }
-
-    fun detachIfCurrent(view: PlayerView) {
-        if (currentView !== view) return
-        view.player = null
-        currentView = null
-        currentPoster = null
-        awaitingFirstFrameMediaId = null
     }
 
     fun release() {

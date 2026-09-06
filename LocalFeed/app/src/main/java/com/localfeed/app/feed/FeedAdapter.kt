@@ -7,7 +7,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
@@ -27,15 +26,18 @@ class FeedAdapter(
         fun onToggleLike(position: Int)
         fun onToggleFavorite(position: Int)
         fun onMore(position: Int)
+        fun onAlbum(position: Int)
         fun onFullscreen(position: Int)
+        fun onLandscapeBack(position: Int)
         fun onSingleTap(position: Int)
         fun onLongPressStart(position: Int)
         fun onLongPressEnd(position: Int)
         fun onLongPressLock(position: Int)
+        fun onLongPressUnlock(position: Int)
+        fun onLockedSpeedCancel(position: Int)
         fun onSeekStart(position: Int, fraction: Float)
         fun onSeekMove(position: Int, fraction: Float)
         fun onSeekStop(position: Int, fraction: Float, canceled: Boolean)
-        fun onPlayerViewRecycled(view: PlayerView)
     }
 
     companion object {
@@ -127,7 +129,7 @@ class FeedAdapter(
     }
 
     fun cancelTransientGestures() {
-        bound.values.forEach { it.get()?.cancelTransientGesture() }
+        bound.values.forEach { it.get()?.cancelTransientGesture(clearLockedIndicator = true) }
     }
 
     fun refreshBoundLayouts() {
@@ -167,7 +169,6 @@ class FeedAdapter(
         holder.boundId?.let { id ->
             if (bound[id]?.get() === holder) bound.remove(id)
         }
-        callbacks.onPlayerViewRecycled(holder.binding.playerView)
         super.onViewRecycled(holder)
     }
 
@@ -180,6 +181,7 @@ class FeedAdapter(
         private var scrubbing = false
         private var longPressStartY = 0f
         private var longPressLocked = false
+        private var lockedIndicatorVisible = false
 
         private val detector = GestureDetector(binding.root.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
@@ -214,7 +216,15 @@ class FeedAdapter(
             binding.likeButton.setOnClickListener { safePosition()?.let(callbacks::onToggleLike) }
             binding.favoriteButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFavorite) }
             binding.moreButton.setOnClickListener { safePosition()?.let(callbacks::onMore) }
+            binding.albumButton.setOnClickListener { safePosition()?.let(callbacks::onAlbum) }
             binding.fullscreenButton.setOnClickListener { safePosition()?.let(callbacks::onFullscreen) }
+            binding.landscapeBackButton.setOnClickListener { safePosition()?.let(callbacks::onLandscapeBack) }
+            binding.speedBadge.setOnClickListener {
+                if (!lockedIndicatorVisible) return@setOnClickListener
+                lockedIndicatorVisible = false
+                binding.speedBadge.visibility = View.GONE
+                safePosition()?.let(callbacks::onLockedSpeedCancel)
+            }
 
             binding.progress.listener = object : FeedProgressView.Listener {
                 override fun onScrubStart(fraction: Float) {
@@ -248,12 +258,21 @@ class FeedAdapter(
                 detector.onTouchEvent(event)
                 when (event.actionMasked) {
                     MotionEvent.ACTION_MOVE -> {
-                        if (longPressed && !longPressLocked && event.y - longPressStartY > binding.root.resources.displayMetrics.density * 88f) {
+                        val dy = event.y - longPressStartY
+                        val density = binding.root.resources.displayMetrics.density
+                        if (longPressed && !longPressLocked && dy > density * 88f) {
                             val p = safePosition()
                             if (p != null) {
                                 longPressLocked = true
-                                binding.speedBadge.text = "2.0× 已锁定"
+                                binding.speedBadge.text = "2.0× 已锁定 · 上滑取消"
                                 callbacks.onLongPressLock(p)
+                            }
+                        } else if (longPressed && longPressLocked && dy < density * 44f) {
+                            val p = safePosition()
+                            if (p != null) {
+                                longPressLocked = false
+                                binding.speedBadge.text = "2.0× 快进中 · 下滑可锁定"
+                                callbacks.onLongPressUnlock(p)
                             }
                         }
                     }
@@ -274,7 +293,6 @@ class FeedAdapter(
             lastPositionMs = 0L
             scrubbing = false
 
-            binding.mediaInfo.text = item.name
             updateStateOnly(item)
             binding.progress.progressFraction = 0f
             binding.progress.visibility = if (item.kind == MediaKind.VIDEO) View.VISIBLE else View.GONE
@@ -286,7 +304,6 @@ class FeedAdapter(
             if (item.kind == MediaKind.IMAGE) {
                 binding.imageView.resetZoom()
                 binding.playerView.visibility = View.GONE
-                binding.posterView.visibility = View.GONE
                 binding.imageView.visibility = View.VISIBLE
                 binding.imageView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 binding.imageView.layoutParams = fullFrameParams()
@@ -298,10 +315,7 @@ class FeedAdapter(
 
             binding.imageView.visibility = View.GONE
             binding.playerView.visibility = View.VISIBLE
-            binding.posterView.visibility = View.VISIBLE
-            binding.posterView.alpha = 1f
             applyMediaLayout(item)
-            thumbnailLoader.load(item, binding.posterView, 1440)
             applyChromeVisibility()
         }
 
@@ -325,13 +339,11 @@ class FeedAdapter(
 
             if (!landscapeFeed && landscape && item.aspectRatio() > 0f) {
                 binding.playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                binding.posterView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 val screenW = binding.root.resources.displayMetrics.widthPixels
                 val screenH = binding.root.resources.displayMetrics.heightPixels
                 val h = (screenW / item.aspectRatio()).roundToInt().coerceAtLeast(1)
                 val top = ((screenH - h) * 0.38f).roundToInt().coerceAtLeast(0)
                 binding.playerView.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = top }
-                binding.posterView.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = top }
                 binding.fullscreenButton.translationY = (top + h + 10).toFloat()
             } else {
                 // Landscape fullscreen is still the same mixed video feed. Portrait clips are fitted
@@ -341,21 +353,14 @@ class FeedAdapter(
                 } else {
                     AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 }
-                binding.posterView.scaleType = if (landscapeFeed || landscape) {
-                    android.widget.ImageView.ScaleType.FIT_CENTER
-                } else {
-                    android.widget.ImageView.ScaleType.CENTER_CROP
-                }
                 binding.playerView.layoutParams = fullFrameParams()
-                binding.posterView.layoutParams = fullFrameParams()
                 binding.fullscreenButton.translationY = 0f
             }
         }
 
         fun applyChromeVisibility() {
-            val visible = if (chromeVisible) View.VISIBLE else View.GONE
-            binding.rightActions.visibility = visible
-            binding.mediaInfo.visibility = visible
+            binding.rightActions.visibility = if (chromeVisible && !landscapeFeed) View.VISIBLE else View.GONE
+            binding.landscapeBackButton.visibility = if (chromeVisible && landscapeFeed) View.VISIBLE else View.GONE
             binding.progress.visibility = if (chromeVisible && safePosition()?.let { itemAt(it).kind == MediaKind.VIDEO } == true) View.VISIBLE else View.GONE
             if (!chromeVisible) binding.fullscreenButton.visibility = View.GONE
             else safePosition()?.let { p -> applyMediaLayout(itemAt(p)) }
@@ -369,8 +374,12 @@ class FeedAdapter(
             }
         }
 
-        fun cancelTransientGesture() {
+        fun cancelTransientGesture(clearLockedIndicator: Boolean = false) {
             cancelLongPressIfNeeded()
+            if (clearLockedIndicator) {
+                lockedIndicatorVisible = false
+                binding.speedBadge.visibility = View.GONE
+            }
             if (scrubbing) {
                 scrubbing = false
                 binding.timePreview.visibility = View.GONE
@@ -385,7 +394,9 @@ class FeedAdapter(
                 binding.speedBadge.visibility = View.GONE
                 callbacks.onLongPressEnd(safePosition() ?: -1)
             } else {
-                binding.speedBadge.postDelayed({ binding.speedBadge.visibility = View.GONE }, 650L)
+                lockedIndicatorVisible = true
+                binding.speedBadge.text = "2.0× 已锁定 · 点击取消"
+                binding.speedBadge.visibility = View.VISIBLE
             }
             longPressLocked = false
         }

@@ -67,7 +67,6 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private var media = listOf<MediaRecord>()
     private var session = FeedSession(emptyList())
     private var landscapeFeed = false
-    private var feedEnteredFromAlbum = false
     private var currentFeedPosition = 0
     private var pagerScrollState = ViewPager2.SCROLL_STATE_IDLE
     private var lastSettledMediaId = -1L
@@ -166,7 +165,6 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         setupAlbumControls()
 
         b.feedTab.setOnClickListener {
-            feedEnteredFromAlbum = false
             showFeed()
         }
         b.albumTab.setOnClickListener { showAlbum() }
@@ -179,7 +177,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
         refreshFromDb()
         if (repository.folderUris().isNotEmpty()) scanAll()
-        showAlbum(ifEmptyOnly = true)
+        showAlbum()
     }
 
     private fun setupAlbumControls() {
@@ -213,7 +211,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                     feedAdapter.append(session.queue.subList(oldSize, session.queue.size))
                     playback.updateQueue(session.queue)
                 }
-                if (pagerScrollState == ViewPager2.SCROLL_STATE_IDLE) settlePage(position)
+                // Attach as soon as ViewPager selects the page. Waiting for IDLE leaves the whole
+                // swipe showing an empty target and was a major source of visible page flashes.
+                settlePage(position)
             }
 
             override fun onPageScrollStateChanged(state: Int) {
@@ -232,8 +232,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                     clearScreen -> setClearScreen(false)
                     b.imageViewerPanel.visibility == View.VISIBLE -> closeImageViewer()
                     landscapeFeed -> exitLandscapeFeed()
-                    b.feedPager.visibility == View.VISIBLE && feedEnteredFromAlbum -> showAlbum()
-                    b.feedPager.visibility == View.VISIBLE -> finish()
+                    b.feedPager.visibility == View.VISIBLE -> returnToAlbum()
                     else -> finish()
                 }
             }
@@ -833,15 +832,13 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         }
         b.feedPager.visibility = View.VISIBLE
         b.albumPanel.visibility = View.GONE
-        b.bottomNav.visibility = if (landscapeFeed || clearScreen) View.GONE else View.VISIBLE
-        setNavSelected(feed = true)
-        if (landscapeFeed) hideSystemBars() else showSystemBars()
+        b.bottomNav.visibility = View.GONE
+        hideSystemBars()
         val position = currentFeedPosition.coerceIn(0, feedAdapter.itemCount - 1)
         b.feedPager.post { settlePage(position) }
     }
 
-    private fun showAlbum(ifEmptyOnly: Boolean = false) {
-        if (ifEmptyOnly && media.isNotEmpty() && session.hasVideos()) { feedEnteredFromAlbum = false; showFeed(); return }
+    private fun showAlbum(anchorMediaId: Long? = null) {
         if (landscapeFeed) exitLandscapeFeed()
         setClearScreen(false)
         playback.pauseAndDetach()
@@ -854,6 +851,35 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         showSystemBars()
         updateEmptyState()
         updateAlbumResults()
+        anchorMediaId?.let(::scrollAlbumToMedia)
+    }
+
+    private fun returnToAlbum() {
+        val anchor = if (currentFeedPosition in 0 until feedAdapter.itemCount) {
+            feedAdapter.itemAt(currentFeedPosition).id
+        } else null
+        showAlbum(anchor)
+    }
+
+    private fun scrollAlbumToMedia(mediaId: Long) {
+        if (albumAdapter.adapterPositionForMediaId(mediaId) < 0) {
+            // A random-feed item may be excluded by the active album filter. Reveal it in 全部 so
+            // Back and the album action always return to the actual video being watched.
+            albumState = albumState.copy(
+                type = AlbumType.ALL,
+                length = AlbumLength.ANY,
+                orientation = AlbumOrientation.ANY,
+                special = AlbumSpecial.NONE,
+                rootUri = null,
+                folderPrefix = null
+            )
+            updateAlbumResults()
+        }
+        val position = albumAdapter.adapterPositionForMediaId(mediaId)
+        if (position >= 0) b.albumGrid.post {
+            albumLayoutManager.scrollToPositionWithOffset(position, dp(8))
+            albumAdapter.notifyItemChanged(position)
+        }
     }
 
     private fun setNavSelected(feed: Boolean) {
@@ -868,7 +894,6 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private fun startFeedFrom(record: MediaRecord) {
         if (record.kind != MediaKind.VIDEO) { showImageViewer(record); return }
         landscapeFeed = false
-        feedEnteredFromAlbum = true
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         feedAdapter.setLandscapeFeed(false)
         session.rebuild(first = record, count = 50)
@@ -916,7 +941,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         val recycler = b.feedPager.getChildAt(0) as? RecyclerView ?: return
         val holder = recycler.findViewHolderForAdapterPosition(position) as? FeedAdapter.Holder
         if (holder == null) { if (retry) b.feedPager.post { attachAndPlay(position, retry = false) }; return }
-        playback.play(record, position, holder.binding.playerView, holder.binding.posterView)
+        playback.play(record, position, holder.binding.playerView)
     }
 
     override fun onToggleLike(position: Int) {
@@ -945,8 +970,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     override fun onLongPressStart(position: Int) { if (isCurrentVideo(position)) playback.beginTemporary2x() }
     override fun onLongPressEnd(position: Int) { playback.endTemporary2x() }
     override fun onLongPressLock(position: Int) { if (isCurrentVideo(position)) playback.lock2x() }
-    override fun onPlayerViewRecycled(view: androidx.media3.ui.PlayerView) { playback.detachIfCurrent(view) }
-
+    override fun onLongPressUnlock(position: Int) { if (isCurrentVideo(position)) playback.unlock2xToTemporary() }
+    override fun onLockedSpeedCancel(position: Int) { if (isCurrentVideo(position)) playback.clearLocked2x() }
+    override fun onAlbum(position: Int) { if (position == currentFeedPosition) returnToAlbum() }
+    override fun onLandscapeBack(position: Int) { if (position == currentFeedPosition) exitLandscapeFeed() }
     override fun onSeekStart(position: Int, fraction: Float) {
         if (!isCurrentVideo(position)) return
         playback.cancelTemporaryBoost(); resumeAfterScrub = playback.player.isPlaying; if (resumeAfterScrub) playback.pauseOnly()
@@ -962,7 +989,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     override fun onFullscreen(position: Int) {
         if (!isCurrentVideo(position) || landscapeFeed) return
-        playback.cancelTemporaryBoost(); landscapeFeed = true; feedAdapter.setLandscapeFeed(true); b.bottomNav.visibility = View.GONE; hideSystemBars()
+        playback.cancelTemporaryBoost(); landscapeFeed = true; feedAdapter.setLandscapeFeed(true); hideSystemBars()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         b.feedPager.post { settlePage(currentFeedPosition) }
     }
@@ -971,7 +998,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         if (!landscapeFeed) return
         playback.cancelTemporaryBoost(); playback.clearLocked2x(); landscapeFeed = false; feedAdapter.setLandscapeFeed(false)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-        b.bottomNav.visibility = if (clearScreen) View.GONE else View.VISIBLE; showSystemBars(); b.feedPager.post { settlePage(currentFeedPosition) }
+        b.bottomNav.visibility = View.GONE; hideSystemBars(); b.feedPager.post { settlePage(currentFeedPosition) }
     }
 
     override fun onMore(position: Int) {
@@ -996,7 +1023,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private fun setClearScreen(value: Boolean) {
         clearScreen = value
         feedAdapter.setChromeVisible(!value)
-        if (b.feedPager.visibility == View.VISIBLE) b.bottomNav.visibility = if (value || landscapeFeed) View.GONE else View.VISIBLE
+        if (b.feedPager.visibility == View.VISIBLE) b.bottomNav.visibility = View.GONE
     }
 
     private fun showSpeedDialog() {

@@ -20,19 +20,26 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/black"
-        app:keep_content_on_player_reset="true"
+        app:keep_content_on_player_reset="false"
         app:resize_mode="zoom"
         app:show_buffering="never"
-        app:surface_type="surface_view"
+        app:surface_type="texture_view"
         app:use_controller="false" />
 
-    <ImageView
-        android:id="@+id/posterView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@android:color/black"
-        android:contentDescription="video poster"
-        android:scaleType="centerCrop"
+    <TextView
+        android:id="@+id/landscapeBackButton"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_gravity="start|top"
+        android:layout_marginStart="52dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/media_badge_bg"
+        android:gravity="center"
+        android:paddingStart="14dp"
+        android:paddingEnd="16dp"
+        android:text="‹  返回"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
         android:visibility="gone" />
 
     <TextView
@@ -77,9 +84,20 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end|bottom"
         android:layout_marginEnd="6dp"
-        android:layout_marginBottom="128dp"
+        android:layout_marginBottom="34dp"
         android:gravity="center"
         android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/albumButton"
+            android:layout_width="56dp"
+            android:layout_height="62dp"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="vertical">
+            <ImageView android:layout_width="31dp" android:layout_height="31dp" android:contentDescription="相册" android:src="@drawable/ic_album" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="相册" android:textColor="#F2FFFFFF" android:textSize="11sp" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/likeButton"
@@ -116,24 +134,11 @@
     </LinearLayout>
 
     <TextView
-        android:id="@+id/mediaInfo"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="start|bottom"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="72dp"
-        android:layout_marginBottom="94dp"
-        android:ellipsize="middle"
-        android:maxLines="1"
-        android:textColor="#E6FFFFFF"
-        android:textSize="13sp" />
-
-    <TextView
         android:id="@+id/timePreview"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="92dp"
+        android:layout_marginBottom="34dp"
         android:background="@drawable/media_badge_bg"
         android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"
         android:text="00:00 / 00:00" android:textColor="@android:color/white" android:textSize="13sp" android:visibility="gone" />
@@ -143,7 +148,7 @@
         android:layout_width="match_parent"
         android:layout_height="30dp"
         android:layout_gravity="bottom"
-        android:layout_marginBottom="58dp"
+        android:layout_marginBottom="0dp"
         android:paddingStart="2dp"
         android:paddingEnd="2dp" />
 
