@@ -31,7 +31,6 @@ class FeedAdapter(
         fun onToggleFavorite(position: Int)
         fun onMore(position: Int)
         fun onFullscreen(position: Int)
-        fun onLandscapeBack(position: Int)
         fun onSingleTap(position: Int)
         fun onLongPressStart(position: Int)
         fun onLongPressEnd(position: Int)
@@ -248,7 +247,6 @@ class FeedAdapter(
             binding.favoriteButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFavorite) }
             binding.moreButton.setOnClickListener { safePosition()?.let(callbacks::onMore) }
             binding.fullscreenButton.setOnClickListener { safePosition()?.let(callbacks::onFullscreen) }
-            binding.landscapeBackButton.setOnClickListener { safePosition()?.let(callbacks::onLandscapeBack) }
             binding.speedBadge.setOnClickListener {
                 if (!lockedIndicatorVisible) return@setOnClickListener
                 lockedIndicatorVisible = false
@@ -295,10 +293,10 @@ class FeedAdapter(
                             if (p != null) {
                                 cancelLockedGesture = false
                                 lockedIndicatorVisible = false
-                                longPressed = false
                                 binding.speedBadge.text = "2.0× 已取消"
                                 binding.speedBadge.postDelayed({ if (!lockedIndicatorVisible) binding.speedBadge.visibility = View.GONE }, 500L)
-                                binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(false)
+                                // Keep the pager locked until this finger is lifted. Releasing here
+                                // leaks the remaining downward motion into ViewPager2.
                                 callbacks.onLockedSpeedCancel(p)
                             }
                         } else if (longPressed && !longPressLocked && dy > density * 88f) {
@@ -427,7 +425,6 @@ class FeedAdapter(
 
         fun applyChromeVisibility() {
             binding.rightActions.visibility = if (chromeVisible && !landscapeFeed) View.VISIBLE else View.GONE
-            binding.landscapeBackButton.visibility = if (landscapeFeed) View.VISIBLE else View.GONE
             binding.progress.visibility = if (chromeVisible && safePosition()?.let { itemAt(it).kind == MediaKind.VIDEO } == true) View.VISIBLE else View.GONE
             if (!chromeVisible) binding.fullscreenButton.visibility = View.GONE
             else safePosition()?.let { p -> applyMediaLayout(itemAt(p)) }

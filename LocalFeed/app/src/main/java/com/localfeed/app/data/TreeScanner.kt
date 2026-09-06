@@ -128,7 +128,7 @@ class TreeScanner(
             try {
                 val meta = if (task.kind == MediaKind.VIDEO) videoMetadata(task.uri) else imageMetadata(resolver, task.uri)
                 db.updateMetadata(task.uri.toString(), meta.durationMs, meta.width, meta.height, meta.rotation)
-                db.clearError(task.uri.toString())
+                db.clearError(task.uri.toString(), "元数据")
             } catch (e: Exception) {
                 errors++
                 if (task.isNew) newFileErrors++

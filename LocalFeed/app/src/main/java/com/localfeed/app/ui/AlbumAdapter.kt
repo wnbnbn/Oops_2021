@@ -87,6 +87,14 @@ class AlbumAdapter(
     fun isSelectionMode(): Boolean = selected.isNotEmpty()
     fun selectedIds(): Set<Long> = selected.toSet()
 
+    fun setSelectedIds(ids: Collection<Long>) {
+        val visible = rows.mapNotNull { (it as? Row.Media)?.record?.id }.toSet()
+        selected.clear()
+        selected.addAll(ids.filter { it in visible })
+        notifyItemRangeChanged(0, itemCount, PAYLOAD_SELECTION)
+        onSelectionChanged(selected.toSet())
+    }
+
     fun clearSelection() {
         if (selected.isEmpty()) return
         val old = selected.toSet()

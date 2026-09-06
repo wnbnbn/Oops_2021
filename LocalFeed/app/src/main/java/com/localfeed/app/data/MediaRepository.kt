@@ -1,6 +1,10 @@
 package com.localfeed.app.data
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.localfeed.app.core.MediaRecord
@@ -22,11 +26,15 @@ data class ScanSummary(
     val authorizationNeeded: Int = 0
 )
 
+data class DiagnosticSummary(val checked: Int, val issues: Int)
+
 class MediaRepository(private val context: Context) {
     private val db = MediaIndexDb(context)
     private val indexIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-index-io") }
     private val metadataIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-metadata-io") }
-    private val utilityIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-utility-io") }
+    private val duplicateIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-duplicate-io") }
+    private val fileIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-file-io") }
+    private val diagnosticIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-diagnostic-io") }
     private val generation = AtomicInteger(0)
     private val trashManager = TrashManager(context, db)
     private val duplicateScanner = DuplicateScanner(context, db)
@@ -185,7 +193,7 @@ class MediaRepository(private val context: Context) {
 
     fun scanDuplicates(onProgress: (String) -> Unit, onDone: (List<DuplicateGroup>) -> Unit) {
         val snapshot = db.allVisible().filter { it.kind == com.localfeed.app.core.MediaKind.VIDEO }
-        utilityIo.execute {
+        duplicateIo.execute {
             val groups = runCatching { duplicateScanner.scan(snapshot, onProgress) }.getOrElse {
                 onProgress("重复扫描失败 · ${it.message ?: it.javaClass.simpleName}")
                 emptyList()
@@ -194,15 +202,75 @@ class MediaRepository(private val context: Context) {
         }
     }
 
-    fun moveToTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = utilityIo.execute {
+    fun diagnoseMedia(onProgress: (Int, Int, String) -> Unit, onDone: (DiagnosticSummary, List<ProblemMedia>) -> Unit) {
+        val snapshot = db.allVisible()
+        diagnosticIo.execute {
+            var issues = 0
+            snapshot.forEachIndexed { index, record ->
+                val problem = diagnoseOne(record)
+                if (problem == null) db.clearError(record.uri, "诊断")
+                else {
+                    issues++
+                    db.recordError(record.uri, record.name, "诊断", problem)
+                }
+                onProgress(index + 1, snapshot.size, record.name)
+            }
+            onDone(DiagnosticSummary(snapshot.size, issues), db.problems())
+        }
+    }
+
+    private fun diagnoseOne(record: MediaRecord): String? = runCatching {
+        if (record.size == 0L) return@runCatching "文件大小为 0，可能尚未下载完成或文件已损坏"
+        context.contentResolver.openFileDescriptor(Uri.parse(record.uri), "r")?.use { descriptor ->
+            if (descriptor.statSize == 0L) return@runCatching "文件内容为空"
+        } ?: return@runCatching "无法打开文件，目录授权可能失效"
+        if (record.kind == com.localfeed.app.core.MediaKind.IMAGE) {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(Uri.parse(record.uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
+                ?: return@runCatching "无法读取图片数据"
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) "无法解码图片尺寸，文件可能损坏或格式不受支持" else null
+        } else {
+            val retriever = MediaMetadataRetriever()
+            val metaProblem = try {
+                retriever.setDataSource(context, Uri.parse(record.uri))
+                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                when {
+                    duration <= 0L -> "无法读取有效时长，视频可能不完整"
+                    width <= 0 || height <= 0 -> "无法读取视频尺寸，视频轨道可能损坏"
+                    else -> null
+                }
+            } finally { retriever.release() }
+            if (metaProblem != null) metaProblem else {
+                val extractor = MediaExtractor()
+                try {
+                    extractor.setDataSource(context, Uri.parse(record.uri), null)
+                    val tracks = (0 until extractor.trackCount).mapNotNull { track ->
+                        extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)
+                    }
+                    val video = tracks.firstOrNull { it.startsWith("video/") }
+                    if (video == null) "容器中没有可识别的视频轨道；轨道：${tracks.joinToString().ifBlank { "无" }}"
+                    else null
+                } finally { extractor.release() }
+            }
+        }
+    }.getOrElse { error ->
+        when (error) {
+            is SecurityException -> "没有读取权限：${error.message ?: "请重新授权目录"}"
+            else -> "${error.javaClass.simpleName}：${error.message ?: "读取或解析失败"}"
+        }
+    }
+
+    fun moveToTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
         callback(trashManager.moveToTrash(record))
     }
 
-    fun restoreFromTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = utilityIo.execute {
+    fun restoreFromTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
         callback(trashManager.restore(record))
     }
 
-    fun deletePermanently(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = utilityIo.execute {
+    fun deletePermanently(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
         callback(trashManager.deletePermanently(record))
     }
 
@@ -212,7 +280,10 @@ class MediaRepository(private val context: Context) {
     fun setFavoritedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setFavoritedMany(ids, value) }
     fun setPlaybackPosition(id: Long, value: Long) = indexIo.execute { db.setPlaybackPosition(id, value) }
     fun setFitMode(id: Long, value: Int) = indexIo.execute { db.setFitMode(id, value) }
-    fun mergeDuplicateState(keepId: Long, removedIds: Collection<Long>) = indexIo.execute { db.mergeDuplicateState(keepId, removedIds) }
+    fun mergeDuplicateState(keepId: Long, removedIds: Collection<Long>, callback: (() -> Unit)? = null) = indexIo.execute {
+        db.mergeDuplicateState(keepId, removedIds)
+        callback?.invoke()
+    }
     fun markShown(id: Long) = indexIo.execute { db.markShown(id) }
     fun hide(id: Long) = indexIo.execute { db.hide(id) }
     fun hideMany(ids: Collection<Long>) = indexIo.execute { db.hideMany(ids) }

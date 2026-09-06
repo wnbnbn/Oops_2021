@@ -505,6 +505,10 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         writableDatabase.delete("media_errors", "uri=?", arrayOf(uri))
     }
 
+    fun clearError(uri: String, stage: String) {
+        writableDatabase.delete("media_errors", "uri=? AND stage=?", arrayOf(uri, stage))
+    }
+
     fun recordByUri(uri: String): MediaRecord? = readableDatabase.rawQuery(
         "SELECT * FROM media WHERE uri=?", arrayOf(uri)
     ).use { c -> readAll(c).firstOrNull() }

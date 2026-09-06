@@ -34,12 +34,13 @@ class ThumbnailLoader(private val context: Context) {
         executor.execute { pruneDiskCache() }
     }
 
-    fun load(record: MediaRecord, view: ImageView, targetPx: Int = 720) {
+    fun load(record: MediaRecord, view: ImageView, targetPx: Int = 720, onResult: ((Boolean) -> Unit)? = null) {
         val key = "${record.uri}|${record.size}|$targetPx"
         jobs.remove(view)?.cancel(false)
         memory.get(key)?.let {
             view.tag = key
             view.setImageBitmap(it)
+            onResult?.invoke(true)
             return
         }
 
@@ -51,11 +52,19 @@ class ThumbnailLoader(private val context: Context) {
             val bitmap = decodeDisk(disk) ?: runCatching {
                 if (record.kind == MediaKind.IMAGE) decodeImage(Uri.parse(record.uri), targetPx)
                 else decodeVideo(Uri.parse(record.uri), targetPx)
-            }.getOrNull()?.also { saveDisk(disk, it) } ?: return@submit
+            }.getOrNull()?.also { saveDisk(disk, it) }
+            if (bitmap == null) {
+                view.post { if (view.tag == key) onResult?.invoke(false) }
+                jobs.remove(view)
+                return@submit
+            }
 
             memory.put(key, bitmap)
             view.post {
-                if (view.tag == key) view.setImageBitmap(bitmap)
+                if (view.tag == key) {
+                    view.setImageBitmap(bitmap)
+                    onResult?.invoke(true)
+                }
                 jobs.remove(view)
             }
         }
