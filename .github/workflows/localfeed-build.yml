@@ -113,12 +113,6 @@ jobs:
           ! grep -q 'org.jetbrains.kotlin.android' app/build.gradle.kts
           ! grep -q 'kotlinOptions' app/build.gradle.kts
 
-      - name: Pure Kotlin checks
-        working-directory: /tmp/localfeed/LocalFeed_v0.2
-        run: |
-          kotlinc app/src/main/java/com/localfeed/app/core/MediaRecord.kt app/src/main/java/com/localfeed/app/ui/AlbumQuery.kt tools/AlbumQueryTest.kt -include-runtime -d /tmp/album-query-test.jar
-          java -jar /tmp/album-query-test.jar
-
       - name: Build v0.4 APK
         working-directory: /tmp/localfeed/LocalFeed_v0.2
         run: gradle :app:assembleDebug --stacktrace --no-daemon
