@@ -109,12 +109,52 @@ jobs:
           assert len(data) == 147365
           assert hashlib.sha256(data).hexdigest() == 'd02bc35059a4cd807a6ae02f0e755d7e76785eabe1561daf98877499c8fee566'
           Path('/tmp/localfeed-v04.patch').write_bytes(data)
-          print('v0.4 patch bytes', len(data))
+
+          # CI's v0.3 baseline already contains the AGP 9.4/Kotlin build-file compatibility edits.
+          # Keep those build files out of the feature patch and normalize version/build settings below.
+          text = data.decode('utf-8')
+          sections = text.split('diff --git ')
+          kept = [sections[0]]
+          excluded = {
+              'a/app/build.gradle.kts b/app/build.gradle.kts',
+              'a/build.gradle.kts b/build.gradle.kts',
+          }
+          for sec in sections[1:]:
+              header = sec.splitlines()[0].strip()
+              if header in excluded:
+                  print('exclude already-normalized build diff:', header)
+                  continue
+              kept.append('diff --git ' + sec)
+          filtered = ''.join(kept)
+          Path('/tmp/localfeed-v04-code.patch').write_text(filtered, encoding='utf-8')
+          print('v0.4 full patch bytes', len(data), 'code patch bytes', len(filtered.encode('utf-8')))
           PY
           cd /tmp/localfeed/LocalFeed_v0.2
-          patch -p1 < /tmp/localfeed-v04.patch
+          patch --batch --forward -p1 < /tmp/localfeed-v04-code.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          app = Path('app/build.gradle.kts')
+          s = app.read_text(encoding='utf-8')
+          s = s.replace('    id("org.jetbrains.kotlin.android")\n', '')
+          s = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 4', s)
+          s = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.4.0"', s)
+          s = re.sub(r'\n\s*kotlinOptions\s*\{\s*\n\s*jvmTarget\s*=\s*"17"\s*\n\s*\}\s*\n', '\n', s, flags=re.S)
+          app.write_text(s, encoding='utf-8')
+
+          root = Path('build.gradle.kts')
+          s = root.read_text(encoding='utf-8')
+          s = re.sub(r'^\s*id\("org\.jetbrains\.kotlin\.android"\).*\n', '', s, flags=re.M)
+          root.write_text(s, encoding='utf-8')
+          PY
+
           grep -q 'versionCode = 4' app/build.gradle.kts
           grep -q 'versionName = "0.4.0"' app/build.gradle.kts
+          ! grep -q 'org.jetbrains.kotlin.android' app/build.gradle.kts
+          ! grep -q 'kotlinOptions' app/build.gradle.kts
+          ! grep -q 'org.jetbrains.kotlin.android' build.gradle.kts
           grep -q 'class DuplicateScanner' app/src/main/java/com/localfeed/app/data/DuplicateScanner.kt
           grep -q 'class AlbumDragSelectTouchListener' app/src/main/java/com/localfeed/app/ui/AlbumDragSelectTouchListener.kt
 
