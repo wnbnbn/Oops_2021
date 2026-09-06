@@ -1,0 +1,79 @@
+name: LocalFeed v0.5 Compile
+
+on:
+  push:
+    branches:
+      - localfeed-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install API 36
+        run: sdkmanager "platforms;android-36" "platform-tools" "build-tools;36.0.0"
+      - name: Stable debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 -d localfeed_ci/stable_debug_keystore.b64 > "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep SHA256
+      - name: Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Rehydrate v0.5 source
+        run: python3 localfeed_ci/rehydrate_v05.py
+      - name: Fix inherited resource compatibility
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/res/layout/activity_main.xml')
+          s = p.read_text(encoding='utf-8')
+          p.write_text(s.replace(' android:selected="true"', ''), encoding='utf-8')
+          PY
+      - name: Pure Kotlin feed tests
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: |
+          kotlinc app/src/main/java/com/localfeed/app/core/MediaRecord.kt app/src/main/java/com/localfeed/app/core/WeightedFeedEngine.kt tools/FeedEngineSmokeTest.kt -include-runtime -d /tmp/feed-v05.jar
+          java -jar /tmp/feed-v05.jar
+          kotlinc app/src/main/java/com/localfeed/app/core/MediaRecord.kt app/src/main/java/com/localfeed/app/core/WeightedFeedEngine.kt app/src/main/java/com/localfeed/app/feed/FeedSession.kt tools/FeedSessionStateTest.kt -include-runtime -d /tmp/session-v05.jar
+          java -jar /tmp/session-v05.jar
+      - name: Assemble v0.5
+        working-directory: /tmp/localfeed/LocalFeed_v0.2
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Re-sign APK with fixed key
+        run: |
+          IN=/tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
+          OUT=/tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/LocalFeed-v0.5-fixed-signature.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$OUT" \
+            "$IN"
+      - name: Verify fixed certificate
+        run: |
+          APK=/tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/LocalFeed-v0.5-fixed-signature.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
+          EXPECTED=2fcf7ed9c4823aa9589c53102b559de274b7ab84f636ded79957aa88746ab7a6
+          echo "certificate=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalFeed-v0.5-fixed-signature-apk
+          path: /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/LocalFeed-v0.5-fixed-signature.apk
+          if-no-files-found: error
