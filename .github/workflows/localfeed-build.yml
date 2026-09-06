@@ -13,10 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Diagnose source chunks
-        run: |
-          wc -c localfeed_ci/chunk_00.b64 localfeed_ci/chunk_01.b64 localfeed_ci/chunk_02.b64 localfeed_ci/chunk_03.b64 localfeed_ci/chunk_04a.b64 localfeed_ci/chunk_04b.b64 localfeed_ci/chunk_05.b64 localfeed_ci/chunk_06.b64 localfeed_ci/chunk_07.b64
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -34,7 +30,7 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Rehydrate LocalFeed source
+      - name: Rehydrate v0.2 baseline
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -46,26 +42,30 @@ jobs:
           ]
           raw = b''.join((Path('localfeed_ci') / name).read_bytes() for name in names)
           clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
-          assert len(clean) == 62604, f'unexpected base64 length: {len(clean)}'
-          data = base64.b64decode(clean, validate=False)
-          Path('/tmp/localfeed.zip').write_bytes(data)
-          print('raw', len(raw), 'clean', len(clean), 'zip', len(data))
+          assert len(clean) == 62604, f'unexpected baseline base64 length: {len(clean)}'
+          Path('/tmp/localfeed.zip').write_bytes(base64.b64decode(clean, validate=False))
           PY
           unzip -t /tmp/localfeed.zip
           mkdir -p /tmp/localfeed
           unzip -q /tmp/localfeed.zip -d /tmp/localfeed
           test -f /tmp/localfeed/LocalFeed_v0.2/settings.gradle.kts
-          sed -i 's/compileSdk = 37/compileSdk = 36/' /tmp/localfeed/LocalFeed_v0.2/app/build.gradle.kts
-          sed -i 's/targetSdk = 37/targetSdk = 36/' /tmp/localfeed/LocalFeed_v0.2/app/build.gradle.kts
-          sed -i 's/androidx.core:core-ktx:1.19.0/androidx.core:core-ktx:1.17.0/' /tmp/localfeed/LocalFeed_v0.2/app/build.gradle.kts
 
-      - name: Build debug APK
+      - name: Apply v0.3 stabilization patch
+        run: |
+          base64 -d localfeed_ci/v03.patch.gz.b64 | gzip -d > /tmp/localfeed-v03.patch
+          cd /tmp/localfeed/LocalFeed_v0.2
+          patch -p1 < /tmp/localfeed-v03.patch
+          grep -q 'versionName = "0.3.0"' app/build.gradle.kts
+          grep -q 'compileSdk = 36' app/build.gradle.kts
+          grep -q 'androidx.core:core-ktx:1.17.0' app/build.gradle.kts
+
+      - name: Build v0.3 debug APK
         working-directory: /tmp/localfeed/LocalFeed_v0.2
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Upload debug APK
+      - name: Upload v0.3 debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.2-debug-apk
+          name: LocalFeed-v0.3-debug-apk
           path: /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
