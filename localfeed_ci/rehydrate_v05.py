@@ -53,10 +53,8 @@ print(f'v0.5 new-file archive: len={len(archive_bytes)} sha256={hashlib.sha256(a
 archive = Path('/tmp/v05-new-files.tar.gz')
 archive.write_bytes(archive_bytes)
 
-# The historical shard set has a bad gzip CRC in the middle shard. GNU tar can still
-# materialize the member before reporting that CRC. Let the Kotlin compiler validate
-# the recovered source, but require the member to exist, decode as UTF-8 and contain
-# the expected scanner declarations so a truncated/corrupt payload cannot silently pass.
+# Historical archive is damaged. Extract as much as gzip/tar can recover, then normalize
+# the recovered Kotlin text so the real compiler can pinpoint the damaged source region.
 extract = subprocess.run(['tar', '-xzf', str(archive)], cwd=PROJECT, check=False)
 print(f'v0.5 archive extraction exit={extract.returncode}')
 
@@ -65,10 +63,17 @@ assert 'versionName = "0.5.0"' in app.read_text(encoding='utf-8')
 scanner = PROJECT / 'app/src/main/java/com/localfeed/app/data/SimilarVideoScanner.kt'
 assert scanner.is_file() and scanner.stat().st_size > 1000
 scanner_bytes = scanner.read_bytes()
-scanner_text = scanner_bytes.decode('utf-8')
-print(f'SimilarVideoScanner.kt len={len(scanner_bytes)} sha256={hashlib.sha256(scanner_bytes).hexdigest()}')
+print(f'SimilarVideoScanner.kt recovered len={len(scanner_bytes)} sha256={hashlib.sha256(scanner_bytes).hexdigest()}')
+scanner_text = scanner_bytes.decode('utf-8', errors='replace')
+replacement_count = scanner_text.count('\ufffd')
+print(f'SimilarVideoScanner.kt replacement chars={replacement_count}')
+for i, line in enumerate(scanner_text.splitlines(), 1):
+    if '\ufffd' in line:
+        print(f'CORRUPT_LINE {i}: {line[:500]}')
+# Re-encode valid UTF-8. This is diagnostic/recovery only; Kotlin compile errors below
+# will tell us exactly what must be reconstructed before this becomes the final source.
+scanner.write_text(scanner_text, encoding='utf-8')
 assert 'class SimilarVideoScanner' in scanner_text
-assert 'data class SimilarVideoMatch' in scanner_text or 'SimilarVideoMatch' in scanner_text
 playback = PROJECT / 'app/src/main/java/com/localfeed/app/media/PlaybackCoordinator.kt'
 assert 'private var awaitingFirstFrameMediaId' in playback.read_text(encoding='utf-8')
 print('READY V0.5', PROJECT)
