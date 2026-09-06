@@ -37,9 +37,13 @@ patch_path.write_bytes(raw)
 subprocess.run(['patch', '--batch', '--forward', '-p1', '-i', str(patch_path)], cwd=PROJECT, check=True)
 
 new_spec = [
-    ('v05nf_00.b64', 3000, '664abb400bb892e7e930c8341d9cb4ae85defdaf7e74f4e5b35810785d043333'),
-    ('v05nf_01.b64', 3000, 'c163eca5773b8d3b20f20bc556875817e14248dde4b3cf50ea65d149152b65d2'),
-    ('v05nf_02.b64', 852, 'bcc2394e5342bfb85d6969ef8993366e95c3ee78d9322e1541885e7c0192bc1b'),
+    ('v05nf2_00.b64', 1000, 'e84ce11683301bfbf131a1fcd7d8cf6c1707234af0f5f0f885d59a76bfa09672'),
+    ('v05nf2_01.b64', 1000, '8a48b26fc833b88d7c1faf1b74d2b08d8a3c886437584f903bc77b0439f2a57d'),
+    ('v05nf2_02.b64', 1000, '85f6c1ed7b25c4e9d8bbb183de306e16d3911e8cebdafdafca13c4be641fb4f0'),
+    ('v05nf2_03.b64', 1000, '556329e6a858d53e632470d8d5607e23dc432920500551c67d4c485ac856c05f'),
+    ('v05nf2_04.b64', 1000, 'e5cb8663bdbd4df3ce1237b2cf14aff1cdfee84ad3763fa71fb89323b853746f'),
+    ('v05nf2_05.b64', 1000, '14f93866df61c369a744e232e5aaaa1e173469071ad658bdd50cd82b27c3ad4d'),
+    ('v05nf2_06.b64', 852, 'bcc2394e5342bfb85d6969ef8993366e95c3ee78d9322e1541885e7c0192bc1b'),
 ]
 new_b64 = checked_parts(new_spec)
 assert len(new_b64) == 6852
