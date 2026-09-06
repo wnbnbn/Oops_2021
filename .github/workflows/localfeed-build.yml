@@ -32,8 +32,17 @@ jobs:
 
       - name: Rehydrate LocalFeed source
         run: |
-          cat localfeed_ci/chunk_*.b64 > /tmp/localfeed.b64
-          base64 -d /tmp/localfeed.b64 > /tmp/localfeed.zip
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, re
+          parts = sorted(Path('localfeed_ci').glob('chunk_*.b64'))
+          raw = b''.join(p.read_bytes() for p in parts)
+          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', raw)
+          data = base64.b64decode(clean, validate=False)
+          Path('/tmp/localfeed.zip').write_bytes(data)
+          print('chunks', len(parts), 'raw', len(raw), 'clean', len(clean), 'zip', len(data))
+          PY
+          unzip -t /tmp/localfeed.zip
           mkdir -p /tmp/localfeed
           unzip -q /tmp/localfeed.zip -d /tmp/localfeed
           test -f /tmp/localfeed/LocalFeed_v0.2/settings.gradle.kts
