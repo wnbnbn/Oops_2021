@@ -23,12 +23,18 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android API 36
-        run: sdkmanager "platforms;android-36" "platform-tools"
+        run: sdkmanager "platforms;android-36" "platform-tools" "build-tools;36.0.0"
 
       - name: Set up Gradle 9.6
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
+
+      - name: Install stable development signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 -d localfeed_ci/stable_debug_keystore.b64 > "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'SHA256|Owner|Valid from' || true
 
       - name: Rehydrate v0.2 baseline
         run: |
@@ -75,13 +81,17 @@ jobs:
           grep -q 'compileSdk = 36' app/build.gradle.kts
           grep -q 'androidx.core:core-ktx:1.17.0' app/build.gradle.kts
 
-      - name: Build v0.3 debug APK
+      - name: Build v0.3 stable-signed debug APK
         working-directory: /tmp/localfeed/LocalFeed_v0.2
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Upload v0.3 debug APK
+      - name: Verify APK signing certificate
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload v0.3 stable-signed debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.3-debug-apk
+          name: LocalFeed-v0.3-stable-signed-debug-apk
           path: /tmp/localfeed/LocalFeed_v0.2/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
