@@ -12,6 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 data class ScanSummary(
     val discovered: Int,
@@ -37,6 +39,7 @@ class MediaRepository(private val context: Context) {
     private val fileIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-file-io") }
     private val diagnosticIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-diagnostic-io") }
     private val generation = AtomicInteger(0)
+    private val storageLock = ReentrantLock(true)
     private val trashManager = TrashManager(context, db)
     private val duplicateScanner = DuplicateScanner(context, db)
 
@@ -46,6 +49,7 @@ class MediaRepository(private val context: Context) {
     fun folderInfos(): List<FolderInfo> = db.folderInfos()
     fun problems(): List<ProblemMedia> = db.problems()
     fun mediaByUri(uri: String): com.localfeed.app.core.MediaRecord? = db.recordByUri(uri)
+    fun mediaById(id: Long): com.localfeed.app.core.MediaRecord? = db.recordById(id)
     fun clearProblem(uri: String) = indexIo.execute { db.clearError(uri) }
     fun originalRelativePath(id: Long): String = db.originalRelativePath(id)
 
@@ -156,8 +160,10 @@ class MediaRepository(private val context: Context) {
             roots.forEachIndexed { rootZero, value ->
                 if (run != generation.get()) return@execute
                 val scanner = TreeScanner(context, db)
-                val result = scanner.scanBasic(Uri.parse(value)) { count ->
-                    onProgress("快速索引 ${rootZero + 1}/${roots.size} · 已发现 $count 个媒体")
+                val result = storageLock.withLock {
+                    scanner.scanBasic(Uri.parse(value)) { count ->
+                        onProgress("快速索引 ${rootZero + 1}/${roots.size} · 已发现 $count 个媒体")
+                    }
                 }
                 allTasks += result.metadataTasks
                 totalErrors += result.errors
@@ -184,8 +190,10 @@ class MediaRepository(private val context: Context) {
             metadataIo.execute {
                 if (run != generation.get()) return@execute
                 val scanner = TreeScanner(context, db)
-                val meta = scanner.enrichMetadata(allTasks) { done, total ->
-                    if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
+                val meta = storageLock.withLock {
+                    scanner.enrichMetadata(allTasks) { done, total ->
+                        if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
+                    }
                 }
                 if (run == generation.get()) onMetadataDone(db.allVisible(), indexedSummary.copy(metadataErrors = meta.errors, newFileErrors = meta.newFileErrors))
             }
@@ -195,7 +203,7 @@ class MediaRepository(private val context: Context) {
     fun scanDuplicates(onProgress: (String) -> Unit, onDone: (List<DuplicateGroup>) -> Unit) {
         val snapshot = db.allVisible().filter { it.kind == com.localfeed.app.core.MediaKind.VIDEO }
         duplicateIo.execute {
-            val groups = runCatching { duplicateScanner.scan(snapshot, onProgress) }.getOrElse {
+            val groups = runCatching { storageLock.withLock { duplicateScanner.scan(snapshot, onProgress) } }.getOrElse {
                 onProgress("重复扫描失败 · ${it.message ?: it.javaClass.simpleName}")
                 emptyList()
             }
@@ -207,7 +215,7 @@ class MediaRepository(private val context: Context) {
         val snapshot = db.allVisible()
         diagnosticIo.execute {
             var issues = 0
-            snapshot.forEachIndexed { index, record ->
+            storageLock.withLock { snapshot.forEachIndexed { index, record ->
                 if (record.kind == com.localfeed.app.core.MediaKind.IMAGE) {
                     // Animated and modern still-image formats are decoded by ImageDecoder in the
                     // reader. BitmapFactory metadata is not a reliable corruption test for them.
@@ -222,7 +230,7 @@ class MediaRepository(private val context: Context) {
                     db.recordError(record.uri, record.name, problem.stage, problem.message)
                 }
                 onProgress(index + 1, snapshot.size, record.name)
-            }
+            } }
             onDone(DiagnosticSummary(snapshot.size, issues), db.problems())
         }
     }
@@ -272,15 +280,15 @@ class MediaRepository(private val context: Context) {
     }
 
     fun moveToTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
-        callback(trashManager.moveToTrash(record))
+        callback(storageLock.withLock { trashManager.moveToTrash(record) })
     }
 
     fun restoreFromTrash(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
-        callback(trashManager.restore(record))
+        callback(storageLock.withLock { trashManager.restore(record) })
     }
 
     fun deletePermanently(record: MediaRecord, callback: (TrashManager.Result) -> Unit) = fileIo.execute {
-        callback(trashManager.deletePermanently(record))
+        callback(storageLock.withLock { trashManager.deletePermanently(record) })
     }
 
     fun setLiked(id: Long, value: Boolean) = indexIo.execute { db.setLiked(id, value) }

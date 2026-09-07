@@ -8,6 +8,7 @@ import android.view.ScaleGestureDetector
 import androidx.appcompat.widget.AppCompatImageView
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 
 /**
  * Feed-friendly pinch zoom for still images.
@@ -40,7 +41,8 @@ class ZoomImageView @JvmOverloads constructor(
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            setZoom((zoom * detector.scaleFactor).coerceIn(1f, 5f), detector.focusX, detector.focusY)
+            val accelerated = detector.scaleFactor.toDouble().pow(1.55).toFloat()
+            setZoom((zoom * accelerated).coerceIn(1f, 6f), detector.focusX, detector.focusY)
             return true
         }
 

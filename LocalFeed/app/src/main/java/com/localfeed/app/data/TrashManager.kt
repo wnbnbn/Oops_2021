@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.localfeed.app.core.MediaRecord
+import java.io.FileNotFoundException
 
 class TrashManager(private val context: Context, private val db: MediaIndexDb) {
     data class Result(val ok: Boolean, val message: String)
@@ -55,7 +56,14 @@ class TrashManager(private val context: Context, private val db: MediaIndexDb) {
         val root = DocumentFile.fromTreeUri(context, Uri.parse(record.rootUri))
         runCatching { root?.findFile(".LocalFeedTrash")?.findFile(record.id.toString())?.delete() }
         Result(true, "已永久删除")
-    }.getOrElse { Result(false, it.message ?: "删除失败") }
+    }.getOrElse { error ->
+        // A process may die after the provider deleted the file but before SQLite was updated.
+        // Treat a missing document as an already-completed retry; permission failures stay failed.
+        if (error is FileNotFoundException) {
+            db.deleteRecord(record.id)
+            Result(true, "文件已不存在，已清理索引")
+        } else Result(false, error.message ?: "删除失败")
+    }
 
     private fun findDirectory(root: DocumentFile, relativeDir: String): DocumentFile? {
         if (relativeDir.isBlank()) return root

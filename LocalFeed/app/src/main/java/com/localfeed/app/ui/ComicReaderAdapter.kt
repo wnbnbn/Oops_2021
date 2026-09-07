@@ -6,14 +6,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.appcompat.widget.AppCompatImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaRecord
 import com.localfeed.app.media.ThumbnailLoader
 
 /** Recycled, width-fitted image strip for manga/comic-style continuous reading. */
 class ComicReaderAdapter(
-    private val loader: ThumbnailLoader,
-    private val onTap: () -> Unit
+    private val loader: ThumbnailLoader
 ) : RecyclerView.Adapter<ComicReaderAdapter.Holder>() {
     private var items = emptyList<MediaRecord>()
 
@@ -26,6 +26,13 @@ class ComicReaderAdapter(
 
     fun positionOf(id: Long): Int = items.indexOfFirst { it.id == id }
     fun itemAt(position: Int): MediaRecord? = items.getOrNull(position)
+    fun updateRecord(record: MediaRecord) {
+        val index = items.indexOfFirst { it.id == record.id }
+        if (index >= 0) {
+            items = items.toMutableList().also { it[index] = record }
+            notifyItemChanged(index)
+        }
+    }
 
     override fun getItemId(position: Int): Long = items[position].id
     override fun getItemCount(): Int = items.size
@@ -37,12 +44,11 @@ class ComicReaderAdapter(
             minimumHeight = (240 * density).toInt()
             setBackgroundColor(Color.BLACK)
         }
-        val image = ZoomImageView(parent.context).apply {
+        val image = AppCompatImageView(parent.context).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.BLACK)
             contentDescription = "连续阅读图片"
-            onSingleTap = onTap
         }
         val error = TextView(parent.context).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
@@ -59,7 +65,6 @@ class ComicReaderAdapter(
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val record = items[position]
-        holder.image.resetZoom()
         val viewportWidth = holder.itemView.resources.displayMetrics.widthPixels.coerceAtLeast(1)
         val ratio = record.aspectRatio().takeIf { it in 0.15f..8f } ?: 0.75f
         val stableHeight = (viewportWidth / ratio).toInt().coerceIn(viewportWidth / 3, viewportWidth * 5)
@@ -76,5 +81,5 @@ class ComicReaderAdapter(
         }
     }
 
-    class Holder(root: View, val image: ZoomImageView, val error: TextView) : RecyclerView.ViewHolder(root)
+    class Holder(root: View, val image: AppCompatImageView, val error: TextView) : RecyclerView.ViewHolder(root)
 }

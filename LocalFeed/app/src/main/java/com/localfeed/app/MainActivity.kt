@@ -51,10 +51,12 @@ import com.localfeed.app.ui.AlbumSort
 import com.localfeed.app.ui.AlbumSpecial
 import com.localfeed.app.ui.AlbumType
 import com.localfeed.app.ui.ComicReaderAdapter
+import com.localfeed.app.ui.ComicReaderZoomTouchListener
 import com.localfeed.app.ui.CardTier
 import com.localfeed.app.ui.TimeGrouping
 import com.localfeed.app.ui.TaskCenter
 import com.localfeed.app.ui.TaskCenterAdapter
+import com.localfeed.app.ui.TaskOperation
 import java.text.DateFormat
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
@@ -70,6 +72,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private lateinit var albumAdapter: AlbumAdapter
     private lateinit var albumLayoutManager: GridLayoutManager
     private lateinit var comicAdapter: ComicReaderAdapter
+    private lateinit var comicZoom: ComicReaderZoomTouchListener
     private lateinit var taskCenter: TaskCenter
     private lateinit var taskAdapter: TaskCenterAdapter
 
@@ -100,6 +103,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private var randomPreferences = RandomPreferences()
     private var actionRailBottomDp = 170
     private var actionOpacityPercent = 82
+    private var activeFileTaskId: String? = null
+    private val pendingFileCallbacks = mutableMapOf<String, (List<MediaRecord>, List<Pair<MediaRecord, String>>) -> Unit>()
     private val imageChromeHide = Runnable {
         if (::b.isInitialized && b.imageViewerPanel.visibility == View.VISIBLE) {
             b.imageViewerChrome.animate().alpha(0f).setDuration(180L).withEndAction {
@@ -163,7 +168,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             onOpen = { record -> if (record.kind == MediaKind.IMAGE) showImageViewer(record) else startFeedFrom(record) },
             onSelectionChanged = ::onAlbumSelectionChanged
         )
-        comicAdapter = ComicReaderAdapter(thumbnails) { toggleImageChrome() }
+        comicAdapter = ComicReaderAdapter(thumbnails)
 
         gridSpan = prefs.getInt("album_grid_span", 3).coerceIn(3, 6)
         longVideoMs = prefs.getLong("long_video_ms", 10L * 60 * 1000).coerceAtLeast(60_000L)
@@ -206,6 +211,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         ))
         b.comicReader.layoutManager = LinearLayoutManager(this)
         b.comicReader.adapter = comicAdapter
+        comicZoom = ComicReaderZoomTouchListener(b.comicReader) { toggleImageChrome() }
+        b.comicReader.addOnItemTouchListener(comicZoom)
         b.comicReader.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
@@ -217,7 +224,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 val first = lm.findFirstVisibleItemPosition()
                 val last = lm.findLastVisibleItemPosition()
                 val center = if (first >= 0 && last >= first) (first + last) / 2 else first
-                comicAdapter.itemAt(center)?.let { imageViewerRecord = it }
+                comicAdapter.itemAt(center)?.let {
+                    imageViewerRecord = it
+                    updateImageActions(it)
+                }
             }
         })
         b.taskCenterList.layoutManager = LinearLayoutManager(this)
@@ -239,12 +249,12 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         b.scanButton.setOnClickListener { scanAll() }
         b.folderButton.setOnClickListener { showFoldersDialog() }
         b.libraryMenuButton.setOnClickListener { showLibraryMenu() }
-        b.imageViewerBack.setOnClickListener { closeImageViewer() }
-        b.imageViewerMode.setOnClickListener { toggleComicReader() }
-        b.imageViewerDelete.setOnClickListener { confirmDeleteCurrentImage() }
-        b.imageViewerOpenWith.setOnClickListener { imageViewerRecord?.let(::openExternally) }
+        b.imageLikeButton.setOnClickListener { likeCurrentImage() }
+        b.imageLikeButton.setOnLongClickListener { resetCurrentImageLikes(); true }
+        b.imageFavoriteButton.setOnClickListener { toggleCurrentImageFavorite() }
+        b.imageModeButton.setOnClickListener { toggleComicReader() }
+        b.imageMoreButton.setOnClickListener { showImageMore() }
         b.imageViewerError.setOnClickListener { imageViewerRecord?.let(::showSingleImage) }
-        b.imageViewerShuffle.setOnClickListener { reshuffleImages() }
         b.imageViewerImage.onSingleTap = { toggleImageChrome() }
         b.imageViewerImage.onVerticalSwipe = { direction -> showAdjacentImage(direction) }
         b.landscapeBackOverlay.setOnClickListener { exitLandscapeFeed() }
@@ -260,6 +270,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         })
 
         refreshFromDb()
+        resumePendingFileTasks()
         if (repository.folderUris().isNotEmpty()) scanAll()
         showAlbum()
     }
@@ -338,9 +349,11 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             b.bottomNav.setPadding(0, 0, 0, bars.bottom)
             b.bottomNav.layoutParams = b.bottomNav.layoutParams.apply { height = baseNavHeight + bars.bottom }
             b.albumGrid.setPadding(0, 0, 0, baseNavHeight + bars.bottom + dp(6))
-            b.imageViewerTopBar.setPadding(dp(10), bars.top, dp(10), 0)
-            b.imageViewerTopBar.layoutParams = b.imageViewerTopBar.layoutParams.apply { height = dp(64) + bars.top }
-            (b.imageViewerBottomBar.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.bottomMargin = dp(22) + bars.bottom; b.imageViewerBottomBar.layoutParams = lp }
+            (b.imageRightActions.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.bottomMargin = dp(actionRailBottomDp) + bars.bottom
+                lp.rightMargin = bars.right + dp(6)
+                b.imageRightActions.layoutParams = lp
+            }
             (b.landscapeBackOverlay.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top + dp(8); lp.leftMargin = bars.left + dp(12); b.landscapeBackOverlay.layoutParams = lp }
             insets
         }
@@ -348,7 +361,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun refreshFromDb() {
-        media = repository.allMedia()
+        media = repository.allMedia().filterNot { it.id in pendingFileTargetIds() }
         problemIds = repository.problems().mapNotNull { problem -> media.firstOrNull { it.uri == problem.uri }?.id }.toSet()
         albumAdapter.setProblemIds(problemIds)
         media.forEach { playbackPositions.putIfAbsent(it.id, it.playbackPositionMs) }
@@ -361,6 +374,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             playback.updateQueue(session.queue)
         }
     }
+
+    private fun pendingFileTargetIds(): Set<Long> = taskCenter.resumable()
+        .flatMapTo(hashSetOf()) { it.targetIds }
 
     private fun updateAlbumResults() {
         val filtered = AlbumQueryEngine.apply(media, albumState, longVideoMs, duplicateIds, problemIds)
@@ -464,54 +480,106 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         onComplete: ((List<MediaRecord>, List<Pair<MediaRecord, String>>) -> Unit)? = null
     ) {
         if (records.isEmpty()) { onComplete?.invoke(emptyList(), emptyList()); return }
-        val taskId = taskCenter.start("永久删除", "已排队 ${records.size} 项", records.firstOrNull()?.uri.orEmpty())
-        val left = AtomicInteger(records.size)
-        val successes = java.util.Collections.synchronizedList(mutableListOf<MediaRecord>())
-        val failures = java.util.Collections.synchronizedList(mutableListOf<Pair<MediaRecord, String>>())
-        b.scanStatus.visibility = View.VISIBLE
-        b.scanStatus.text = "正在永久删除 0/${records.size}"
-        records.forEach { record ->
-            repository.deletePermanently(record) { result ->
-                if (result.ok) successes += record else failures += record to result.message
-                val remain = left.decrementAndGet()
-                runOnUiThread {
-                    b.scanStatus.text = "正在永久删除 ${records.size - remain}/${records.size} · ${record.name}"
-                    taskCenter.update(taskId, "${record.name} · ${records.size - remain}/${records.size}", records.size - remain, records.size)
-                    if (remain == 0) {
-                        albumAdapter.clearSelection()
-                        refreshFromDb()
-                        b.scanStatus.text = if (failures.isEmpty()) "已永久删除 · ${records.size} 项" else "删除完成 · ${successes.size} 成功 · ${failures.size} 失败"
-                        if (failures.isEmpty()) taskCenter.finish(taskId, "成功删除 ${successes.size} 项 · 释放 ${formatBytes(successes.sumOf { it.size })}")
-                        else taskCenter.fail(taskId, "${successes.size} 成功 · ${failures.size} 失败；失败文件仍保留")
-                        onComplete?.invoke(successes.toList(), failures.toList())
-                    }
-                }
-            }
-        }
+        val taskId = taskCenter.startPersistent(
+            "永久删除", "已排队 ${records.size} 项", records.first().uri,
+            TaskOperation.PERMANENT_DELETE, records.map { it.id }
+        )
+        if (onComplete != null) pendingFileCallbacks[taskId] = onComplete
+        excludeFromActiveUi(records)
+        runPersistentFileTask(taskId)
     }
 
     private fun batchTrash(records: List<MediaRecord>) {
-        val taskId = taskCenter.start("移到最近删除", "已排队 ${records.size} 项", records.firstOrNull()?.uri.orEmpty())
-        val left = AtomicInteger(records.size)
-        val failures = AtomicInteger(0)
-        b.scanStatus.visibility = View.VISIBLE
-        b.scanStatus.text = "正在移动到最近删除 0/${records.size}"
-        records.forEach { record ->
-            repository.moveToTrash(record) { result ->
-                if (!result.ok) failures.incrementAndGet()
-                val remain = left.decrementAndGet()
-                runOnUiThread {
-                    b.scanStatus.text = "正在移动到最近删除 ${records.size - remain}/${records.size}"
-                    taskCenter.update(taskId, "${record.name} · ${records.size - remain}/${records.size}", records.size - remain, records.size)
-                    if (remain == 0) {
-                        albumAdapter.clearSelection()
-                        refreshFromDb()
-                        b.scanStatus.text = if (failures.get() == 0) "已移到最近删除 · ${records.size} 项" else "完成 · ${records.size - failures.get()} 成功 · ${failures.get()} 失败"
-                        if (failures.get() == 0) taskCenter.finish(taskId, "已移动 ${records.size} 项") else taskCenter.fail(taskId, "${records.size - failures.get()} 成功 · ${failures.get()} 失败")
-                    }
-                }
+        if (records.isEmpty()) return
+        val taskId = taskCenter.startPersistent(
+            "移到最近删除", "已排队 ${records.size} 项", records.first().uri,
+            TaskOperation.MOVE_TO_TRASH, records.map { it.id }
+        )
+        excludeFromActiveUi(records)
+        runPersistentFileTask(taskId)
+    }
+
+    private fun resumePendingFileTasks() {
+        if (activeFileTaskId != null) return
+        val task = taskCenter.resumable().firstOrNull() ?: return
+        val records = task.targetIds.mapNotNull(repository::mediaById)
+        if (records.isNotEmpty()) excludeFromActiveUi(records)
+        runPersistentFileTask(task.id)
+    }
+
+    /**
+     * Executes one durable file task in strict order. Completed ids are written after every file,
+     * so force-closing the app resumes at the next item instead of leaving a fake frozen counter.
+     */
+    private fun runPersistentFileTask(
+        taskId: String,
+        onComplete: ((List<MediaRecord>, List<Pair<MediaRecord, String>>) -> Unit)? = null
+    ) {
+        if (activeFileTaskId != null) return
+        val task = taskCenter.snapshot().firstOrNull { it.id == taskId } ?: return
+        if (task.operation == TaskOperation.NONE) return
+        activeFileTaskId = taskId
+        taskCenter.markRunning(taskId)
+        val successes = mutableListOf<MediaRecord>()
+        val failures = mutableListOf<Pair<MediaRecord, String>>()
+        val pending = task.targetIds.filterNot { it in task.completedIds }
+
+        fun finishTask() = runOnUiThread {
+            val doneCount = task.targetIds.size - failures.size
+            if (failures.isEmpty()) {
+                val verb = if (task.operation == TaskOperation.PERMANENT_DELETE) "永久删除" else "移到最近删除"
+                taskCenter.finish(taskId, "已$verb $doneCount 项${if (successes.isNotEmpty()) " · ${formatBytes(successes.sumOf { it.size })}" else ""}")
+            } else {
+                taskCenter.fail(taskId, "$doneCount 成功 · ${failures.size} 失败；失败文件仍保留")
+            }
+            activeFileTaskId = null
+            albumAdapter.clearSelection()
+            refreshFromDb()
+            b.scanStatus.text = if (failures.isEmpty()) "文件任务完成 · $doneCount 项" else "文件任务完成 · ${failures.size} 项失败"
+            (onComplete ?: pendingFileCallbacks.remove(taskId))?.invoke(successes.toList(), failures.toList())
+            resumePendingFileTasks()
+        }
+
+        fun process(index: Int) {
+            if (index >= pending.size) { finishTask(); return }
+            val id = pending[index]
+            val record = repository.mediaById(id)
+            if (record == null) {
+                taskCenter.markTargetComplete(taskId, id, "已确认完成 · ${task.progress + index + 1}/${task.total}")
+                process(index + 1)
+                return
+            }
+            val callback: (TrashManager.Result) -> Unit = { result ->
+                if (result.ok) {
+                    successes += record
+                    taskCenter.markTargetComplete(taskId, id, "${record.name} · ${task.completedIds.size + index + 1}/${task.total}")
+                } else failures += record to result.message
+                process(index + 1)
+            }
+            when (task.operation) {
+                TaskOperation.PERMANENT_DELETE -> repository.deletePermanently(record, callback)
+                TaskOperation.MOVE_TO_TRASH -> repository.moveToTrash(record, callback)
+                TaskOperation.NONE -> process(index + 1)
             }
         }
+        process(0)
+    }
+
+    private fun excludeFromActiveUi(records: Collection<MediaRecord>) {
+        val ids = records.mapTo(hashSetOf()) { it.id }
+        if (ids.isEmpty()) return
+        if (currentFeedPosition in 0 until feedAdapter.itemCount && feedAdapter.itemAt(currentFeedPosition).id in ids) {
+            playback.pauseAndDetach()
+        }
+        media = media.filterNot { it.id in ids }
+        ids.forEach(session::remove)
+        feedAdapter.syncQueue(session.queue)
+        playback.updateQueue(session.queue)
+        lastSettledMediaId = -1L
+        albumAdapter.clearSelection()
+        updateAlbumResults()
+        updateEmptyState()
+        if (b.feedPager.visibility == View.VISIBLE) moveToValidPosition(currentFeedPosition)
     }
 
     private fun updateEmptyState() {
@@ -591,15 +659,15 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         val opacityText = android.widget.TextView(this).apply { setTextColor(0xE6FFFFFF.toInt()); text = "按钮透明度 · $actionOpacityPercent%"; setPadding(0, dp(12), 0, 0) }
         val opacitySeek = SeekBar(this).apply { max = 70; progress = actionOpacityPercent - 30 }
         box.addView(heightText); box.addView(heightSeek); box.addView(opacityText); box.addView(opacitySeek)
-        val dialog = AlertDialog.Builder(this).setTitle("播放页操作按钮").setMessage("高度只沿右侧安全轨道调整；透明度不会影响点击区域。")
+        val dialog = AlertDialog.Builder(this).setTitle("播放 / 图片操作按钮").setMessage("视频和图片共用右侧安全轨道；透明度不会影响点击区域。")
             .setView(box).setNeutralButton("重置", null).setNegativeButton("取消", null).setPositiveButton("保存", null).create()
         heightSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionRailBottomDp = progress + 90; heightText.text = "按钮高度 · ${actionRailBottomDp}dp"; feedAdapter.setActionRailBottom(dp(actionRailBottomDp)) }
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionRailBottomDp = progress + 90; heightText.text = "按钮高度 · ${actionRailBottomDp}dp"; feedAdapter.setActionRailBottom(dp(actionRailBottomDp)); applyImageRailSettings() }
             override fun onStartTrackingTouch(bar: SeekBar?) = Unit
             override fun onStopTrackingTouch(bar: SeekBar?) = Unit
         })
         opacitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionOpacityPercent = progress + 30; opacityText.text = "按钮透明度 · $actionOpacityPercent%"; feedAdapter.setActionOpacity(actionOpacityPercent / 100f) }
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionOpacityPercent = progress + 30; opacityText.text = "按钮透明度 · $actionOpacityPercent%"; feedAdapter.setActionOpacity(actionOpacityPercent / 100f); applyImageRailSettings() }
             override fun onStartTrackingTouch(bar: SeekBar?) = Unit
             override fun onStopTrackingTouch(bar: SeekBar?) = Unit
         })
@@ -607,10 +675,21 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         val beforeOpacity = actionOpacityPercent
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { heightSeek.progress = 80; opacitySeek.progress = 52 }
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { actionRailBottomDp = beforeHeight; actionOpacityPercent = beforeOpacity; feedAdapter.setActionRailBottom(dp(beforeHeight)); feedAdapter.setActionOpacity(beforeOpacity / 100f); dialog.dismiss() }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { actionRailBottomDp = beforeHeight; actionOpacityPercent = beforeOpacity; feedAdapter.setActionRailBottom(dp(beforeHeight)); feedAdapter.setActionOpacity(beforeOpacity / 100f); applyImageRailSettings(); dialog.dismiss() }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { prefs.edit().putInt("action_rail_bottom_dp", actionRailBottomDp).putInt("action_opacity_percent", actionOpacityPercent).apply(); dialog.dismiss() }
         }
         dialog.show()
+    }
+
+    private fun applyImageRailSettings() {
+        if (!::b.isInitialized) return
+        val bottomInset = ViewCompat.getRootWindowInsets(b.root)
+            ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
+        (b.imageRightActions.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            lp.bottomMargin = dp(actionRailBottomDp) + bottomInset
+            b.imageRightActions.layoutParams = lp
+        }
+        b.imageRightActions.alpha = actionOpacityPercent / 100f
     }
 
     private fun showLongVideoThresholdDialog() {
@@ -832,10 +911,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     private fun runDuplicateScan(selectWhenDone: Boolean) {
         val taskId = taskCenter.start("重复视频扫描", "正在准备内容哈希")
-        b.scanStatus.visibility = View.VISIBLE
-        b.scanStatus.text = "正在准备重复视频扫描……"
         repository.scanDuplicates(
-            onProgress = { text -> runOnUiThread { b.scanStatus.text = text; taskCenter.update(taskId, text) } },
+            onProgress = { text -> runOnUiThread { taskCenter.update(taskId, text) } },
             onDone = { groups -> runOnUiThread {
                 duplicateGroups = groups
                 duplicateKeepByHash.clear()
@@ -969,7 +1046,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             .setMessage("原位置：$rootPath/${original.ifBlank { record.name }}\n大小：${formatBytes(record.size)}")
             .setNegativeButton("取消", null)
             .setNeutralButton("永久删除") { _, _ ->
-                repository.deletePermanently(record) { result -> runOnUiThread { Toast.makeText(this, result.message, Toast.LENGTH_LONG).show(); if (result.ok) refreshFromDb() } }
+                batchPermanentDelete(listOf(record))
             }
             .setPositiveButton("恢复") { _, _ ->
                 repository.restoreFromTrash(record) { result -> runOnUiThread { Toast.makeText(this, result.message, Toast.LENGTH_LONG).show(); if (result.ok) refreshFromDb() } }
@@ -1006,11 +1083,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     private fun runProblemDiagnostics() {
         val taskId = taskCenter.start("问题媒体诊断", "准备检查当前媒体")
-        b.scanStatus.visibility = View.VISIBLE
-        b.scanStatus.text = "正在准备媒体诊断……"
         repository.diagnoseMedia(
             onProgress = { done, total, name -> runOnUiThread {
-                b.scanStatus.text = "媒体诊断 $done/$total · $name"
                 taskCenter.update(taskId, "$name · $done/$total", done, total)
             } },
             onDone = { summary, problems -> runOnUiThread {
@@ -1044,9 +1118,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                         else AlertDialog.Builder(this).setTitle("永久删除 ${record.name}？")
                             .setMessage("此操作无法恢复。")
                             .setNegativeButton("取消", null)
-                            .setPositiveButton("永久删除") { _, _ -> repository.deletePermanently(record) { result -> runOnUiThread {
-                                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show(); if (result.ok) refreshFromDb()
-                            } } }.show()
+                            .setPositiveButton("永久删除") { _, _ -> batchPermanentDelete(listOf(record)) }.show()
                     }
                     4 -> {
                         repository.clearProblem(problem.uri)
@@ -1065,17 +1137,14 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         }
         scanInProgress = true
         val taskId = taskCenter.start(if (auto) "自动检查新增文件" else "扫描媒体目录", "正在读取目录")
-        b.scanStatus.visibility = View.VISIBLE
-        b.scanStatus.text = if (auto) "正在自动检查新增文件……" else "正在扫描媒体目录……"
         repository.scanAll(
-            onProgress = { text -> runOnUiThread { b.scanStatus.text = text; taskCenter.update(taskId, text) } },
+            onProgress = { text -> runOnUiThread { taskCenter.update(taskId, text) } },
             onIndexed = { list, summary -> runOnUiThread {
-                media = list
+                media = list.filterNot { it.id in pendingFileTargetIds() }
                 media.forEach { playbackPositions.putIfAbsent(it.id, it.playbackPositionMs) }
                 session.replaceSource(media)
                 updateAlbumResults()
                 updateEmptyState()
-                b.scanStatus.text = "索引完成 · 新增 ${summary.newFiles} · 更新 ${summary.updatedFiles} · 待分析 ${summary.metadataQueued}"
                 if (session.queue.isEmpty() && session.hasVideos()) {
                     session.rebuild(count = 50); feedAdapter.submit(session.queue)
                 } else if (session.queue.isNotEmpty()) {
@@ -1085,7 +1154,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 playback.updateQueue(session.queue)
             } },
             onMetadataDone = { list, summary -> runOnUiThread {
-                media = list
+                media = list.filterNot { it.id in pendingFileTargetIds() }
                 session.replaceSource(media)
                 updateAlbumResults()
                 updateEmptyState()
@@ -1281,6 +1350,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         imageViewerRecord = record
         b.imageViewerImage.resetZoom()
         b.imageViewerImage.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        b.imageViewerImage.animate().cancel()
+        b.imageViewerImage.alpha = 0.25f
+        b.imageViewerImage.scaleX = 0.985f
+        b.imageViewerImage.scaleY = 0.985f
         b.imageViewerError.visibility = View.GONE
         b.imageViewerImage.visibility = View.VISIBLE
         thumbnails.load(record, b.imageViewerImage, 2160) { ok ->
@@ -1288,11 +1361,17 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             b.imageViewerError.text = "${record.name}\n图片读取失败，点击重试"
             b.imageViewerError.visibility = if (ok) View.GONE else View.VISIBLE
             b.imageViewerImage.visibility = if (ok) View.VISIBLE else View.INVISIBLE
+            if (ok) {
+                val animation = b.imageViewerImage.animate().alpha(1f).setDuration(180L)
+                if (!b.imageViewerImage.isZoomed()) animation.scaleX(1f).scaleY(1f)
+                animation.start()
+            }
         }
         b.imageViewerName.text = record.name
         b.imageViewerName.visibility = View.VISIBLE
         b.comicReader.visibility = View.GONE
-        b.imageViewerMode.text = "连续阅读"
+        b.imageModeLabel.text = "瀑布"
+        updateImageActions(record)
     }
 
     private fun showAdjacentImage(direction: Int) {
@@ -1334,6 +1413,92 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         showImageChromeTemporarily()
     }
 
+    private fun updateImageActions(record: MediaRecord) {
+        b.imageLikeIcon.setImageResource(if (record.likeCount > 0) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
+        b.imageLikeCount.text = record.likeCount.toString()
+        b.imageLikeCount.visibility = if (record.likeCount > 0) View.VISIBLE else View.GONE
+        b.imageFavoriteIcon.setImageResource(if (record.favorited) R.drawable.ic_star_filled else R.drawable.ic_star_outline)
+        b.imageViewerName.text = record.name
+        b.imageRightActions.alpha = actionOpacityPercent / 100f
+    }
+
+    private fun replaceImageRecord(updated: MediaRecord) {
+        imageViewerRecord = updated
+        imageViewerItems = imageViewerItems.map { if (it.id == updated.id) updated else it }
+        media = media.map { if (it.id == updated.id) updated else it }
+        albumAdapter.updateRecord(updated)
+        comicAdapter.updateRecord(updated)
+        updateImageActions(updated)
+        if (albumState.special in setOf(AlbumSpecial.LIKED, AlbumSpecial.FAVORITE, AlbumSpecial.COLLECTION)) updateAlbumResults()
+    }
+
+    private fun likeCurrentImage() {
+        val old = imageViewerRecord ?: return
+        val updated = old.copy(liked = true, likeCount = old.likeCount + 1)
+        repository.setLikeCount(old.id, updated.likeCount)
+        replaceImageRecord(updated)
+    }
+
+    private fun resetCurrentImageLikes() {
+        val old = imageViewerRecord ?: return
+        if (old.likeCount == 0) return
+        repository.setLikeCount(old.id, 0)
+        replaceImageRecord(old.copy(liked = false, likeCount = 0))
+        Toast.makeText(this, "已清空图片点赞次数", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleCurrentImageFavorite() {
+        val old = imageViewerRecord ?: return
+        val updated = old.copy(favorited = !old.favorited)
+        repository.setFavorited(old.id, updated.favorited)
+        replaceImageRecord(updated)
+    }
+
+    private fun showImageMore() {
+        val record = imageViewerRecord ?: return
+        val inComic = b.comicReader.visibility == View.VISIBLE
+        val labels = arrayOf(
+            if (inComic) "切换到单图" else "切换到瀑布流",
+            "洗牌 / 重置瀑布流",
+            "分享",
+            "用其他应用打开",
+            "点赞 -1",
+            "清空点赞",
+            if (record.specialMark) "取消特殊标记" else "添加特殊标记",
+            "永久删除",
+            "媒体信息"
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("${CardTier.forCount(record.likeCount).title} · ${record.name}")
+            .setItems(labels) { _, which ->
+                when (which) {
+                    0 -> toggleComicReader()
+                    1 -> reshuffleImages()
+                    2 -> share(record)
+                    3 -> openExternally(record)
+                    4 -> {
+                        val count = (record.likeCount - 1).coerceAtLeast(0)
+                        repository.setLikeCount(record.id, count)
+                        replaceImageRecord(record.copy(liked = count > 0, likeCount = count))
+                    }
+                    5 -> resetCurrentImageLikes()
+                    6 -> {
+                        val updated = record.copy(specialMark = !record.specialMark)
+                        repository.setSpecialMark(record.id, updated.specialMark)
+                        replaceImageRecord(updated)
+                    }
+                    7 -> confirmDeleteCurrentImage()
+                    8 -> showInfo(record)
+                }
+            }.show()
+        val tier = CardTier.forCount(record.likeCount)
+        dialog.window?.decorView?.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xF2212227.toInt())
+            cornerRadius = dp(18).toFloat()
+            setStroke(dp(if (tier.widthDp >= 2f) 2 else 1), tier.color)
+        }
+    }
+
     private fun toggleComicReader() {
         val record = imageViewerRecord ?: return
         if (b.comicReader.visibility == View.VISIBLE) {
@@ -1342,15 +1507,16 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             val last = lm?.findLastVisibleItemPosition() ?: first
             val current = comicAdapter.itemAt(if (last >= first) (first + last) / 2 else first) ?: record
             showSingleImage(current)
+            comicZoom.reset()
             return
         }
         if (imageViewerItems.none { it.id == record.id }) imageViewerItems = listOf(record) + imageViewerItems
         comicAdapter.submit(imageViewerItems)
         b.imageViewerImage.visibility = View.GONE
         b.imageViewerError.visibility = View.GONE
-        b.imageViewerName.visibility = View.GONE
+        b.imageViewerName.visibility = View.VISIBLE
         b.comicReader.visibility = View.VISIBLE
-        b.imageViewerMode.text = "单图"
+        b.imageModeLabel.text = "单图"
         val position = comicAdapter.positionOf(record.id)
         if (position >= 0) b.comicReader.post {
             (b.comicReader.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(position, 0)
@@ -1364,25 +1530,11 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             .setMessage("${record.name}\n\n${MediaPathUtils.absoluteFilePath(record)}\n\n此操作无法恢复。")
             .setNegativeButton("取消", null)
             .setPositiveButton("永久删除") { _, _ ->
-                val taskId = taskCenter.start("永久删除图片", record.name, record.uri)
-                b.imageViewerDelete.isEnabled = false
-                b.imageViewerDelete.text = "删除中"
-                repository.deletePermanently(record) { result -> runOnUiThread {
-                    b.imageViewerDelete.isEnabled = true
-                    b.imageViewerDelete.text = "⌫"
-                    if (!result.ok) {
-                        taskCenter.fail(taskId, "${record.name} · ${result.message}")
-                        Toast.makeText(this, "删除失败：${result.message}", Toast.LENGTH_LONG).show()
-                        return@runOnUiThread
-                    }
-                    val oldIndex = imageViewerItems.indexOfFirst { it.id == record.id }.coerceAtLeast(0)
-                    taskCenter.finish(taskId, "已删除 ${record.name} · ${formatBytes(record.size)}")
-                    imageViewerItems = imageViewerItems.filterNot { it.id == record.id }
-                    refreshFromDb()
-                    val next = imageViewerItems.getOrNull(oldIndex.coerceAtMost(imageViewerItems.lastIndex))
-                    if (next == null) closeImageViewer() else showSingleImage(next)
-                    Toast.makeText(this, "已永久删除 ${record.name}", Toast.LENGTH_SHORT).show()
-                } }
+                val oldIndex = imageViewerItems.indexOfFirst { it.id == record.id }.coerceAtLeast(0)
+                imageViewerItems = imageViewerItems.filterNot { it.id == record.id }
+                val next = imageViewerItems.getOrNull(oldIndex.coerceAtMost(imageViewerItems.lastIndex))
+                if (next == null) closeImageViewer() else showSingleImage(next)
+                batchPermanentDelete(listOf(record))
             }.show()
     }
 
@@ -1396,12 +1548,12 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             val last = lm?.findLastVisibleItemPosition() ?: first
             comicAdapter.itemAt(if (last >= first) (first + last) / 2 else first)?.let { imageViewerRecord = it; anchor = it.id }
         }
-        b.imageViewerImage.resetZoom(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList()
+        b.imageViewerImage.resetZoom(); comicZoom.reset(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList()
         b.bottomNav.visibility = View.VISIBLE; b.albumPanel.visibility = View.VISIBLE; showSystemBars(); anchor?.let(::scrollAlbumToMedia)
     }
 
     private fun closeImageViewerIfOpen() {
-        if (b.imageViewerPanel.visibility == View.VISIBLE) { b.imageViewerImage.resetZoom(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList() }
+        if (b.imageViewerPanel.visibility == View.VISIBLE) { b.imageViewerImage.resetZoom(); comicZoom.reset(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList() }
     }
 
     private fun settlePage(position: Int) {
@@ -1636,13 +1788,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun permanentlyDelete(record: MediaRecord, position: Int) {
-        val taskId = taskCenter.start("永久删除", record.name, record.uri)
-        if (playback.isCurrent(record.id)) playback.pauseAndDetach()
-        removeRecordFromUi(record, position)
-        repository.deletePermanently(record) { result -> runOnUiThread {
-            if (result.ok) { taskCenter.finish(taskId, "已删除 ${record.name} · ${formatBytes(record.size)}"); Toast.makeText(this, "已永久删除", Toast.LENGTH_SHORT).show() }
-            else { taskCenter.fail(taskId, "${record.name} · ${result.message}"); Toast.makeText(this, "删除失败：${result.message}", Toast.LENGTH_LONG).show(); refreshFromDb() }
-        } }
+        batchPermanentDelete(listOf(record))
     }
 
     private fun removeRecordFromUi(record: MediaRecord, feedPosition: Int) {
@@ -1737,9 +1883,11 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     override fun onResume() {
         super.onResume()
-        val wasAway = backgroundedAt > 0L && System.currentTimeMillis() - backgroundedAt >= 1_500L
+        val now = System.currentTimeMillis()
+        val wasAway = backgroundedAt > 0L && now - backgroundedAt >= 5_000L
+        val scanDebounced = now - prefs.getLong("last_import_at", 0L) >= 30_000L
         backgroundedAt = 0L
-        if (wasAway && ::repository.isInitialized && repository.folderUris().isNotEmpty() && !scanInProgress) scanAll(auto = true)
+        if (wasAway && scanDebounced && ::repository.isInitialized && repository.folderUris().isNotEmpty() && !scanInProgress) scanAll(auto = true)
         if (::b.isInitialized && b.feedPager.visibility == View.VISIBLE && pagerScrollState == ViewPager2.SCROLL_STATE_IDLE) b.feedPager.post { settlePage(currentFeedPosition) }
     }
 

@@ -1,4 +1,4 @@
-# LocalFeed v0.6.3
+# LocalFeed v0.6.4
 
 Android 本地视频随机 Feed + 图片/视频相册。普通目录通过 SAF 授权，`.nomedia` 避免常规图库索引；不提供加密。
 
@@ -13,7 +13,7 @@ GitHub Actions 的 `LocalFeed v0.6 Compile` 直接构建本目录，已停止源
 
 CI 使用既有固定测试 key 重签并检查 APK 实际证书 SHA256：
 `2F:CF:7E:D9:C4:82:3A:A9:58:9C:53:10:2B:55:9D:E2:74:B7:AB:84:F6:36:DE:D7:99:57:AA:88:74:6A:B7:A6`。
-这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 10 / versionName 0.6.3。
+这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 11 / versionName 0.6.4。
 
 ## 本次恢复
 

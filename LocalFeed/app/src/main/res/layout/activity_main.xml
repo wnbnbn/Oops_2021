@@ -205,35 +205,40 @@
             android:layout_height="match_parent"
             android:visibility="gone">
             <LinearLayout
-                android:id="@+id/imageViewerTopBar"
-                android:layout_width="match_parent"
-                android:layout_height="64dp"
-                android:layout_gravity="top"
-                android:background="@drawable/reader_top_gradient"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp">
-                <TextView android:id="@+id/imageViewerBack" style="@style/ReaderIconButton" android:text="‹" android:textSize="34sp" />
-                <TextView android:id="@+id/imageViewerName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:ellipsize="middle" android:maxLines="1" android:textColor="#EFFFFFFF" android:textSize="13sp" />
-                <TextView android:id="@+id/imageViewerOpenWith" style="@style/ReaderIconButton" android:text="↗" android:textSize="20sp" />
-                <TextView android:id="@+id/imageViewerDelete" style="@style/ReaderIconButton" android:layout_marginStart="8dp" android:text="⌫" android:textColor="#FFFF8A80" android:textSize="20sp" />
-            </LinearLayout>
-            <LinearLayout
-                android:id="@+id/imageViewerBottomBar"
-                android:layout_width="wrap_content"
-                android:layout_height="52dp"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="22dp"
-                android:background="@drawable/reader_control_bar_bg"
+                android:id="@+id/imageRightActions"
+                android:layout_width="54dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|bottom"
+                android:layout_marginEnd="6dp"
+                android:layout_marginBottom="118dp"
                 android:gravity="center"
-                android:orientation="horizontal"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp">
-                <TextView android:id="@+id/imageViewerMode" style="@style/ReaderTextButton" android:text="连续阅读" />
-                <View android:layout_width="1dp" android:layout_height="22dp" android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:background="#2FFFFFFF" />
-                <TextView android:id="@+id/imageViewerShuffle" style="@style/ReaderTextButton" android:text="洗牌" />
+                android:orientation="vertical">
+                <LinearLayout android:id="@+id/imageLikeButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:id="@+id/imageLikeIcon" android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片点赞" android:src="@drawable/ic_heart_outline" />
+                    <TextView android:id="@+id/imageLikeCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@android:color/white" android:textSize="10sp" android:textStyle="bold" android:visibility="gone" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageFavoriteButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:id="@+id/imageFavoriteIcon" android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片收藏" android:src="@drawable/ic_star_outline" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageModeButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:layout_width="32dp" android:layout_height="32dp" android:contentDescription="切换图片浏览方式" android:src="@drawable/ic_album" />
+                    <TextView android:id="@+id/imageModeLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瀑布" android:textColor="@android:color/white" android:textSize="9sp" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageMoreButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片更多操作" android:src="@drawable/ic_more" />
+                </LinearLayout>
             </LinearLayout>
+            <TextView
+                android:id="@+id/imageViewerName"
+                android:layout_width="260dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="start|bottom"
+                android:layout_marginStart="14dp"
+                android:layout_marginBottom="32dp"
+                android:ellipsize="middle"
+                android:maxLines="1"
+                android:textColor="#DFFFFFFF"
+                android:textSize="12sp" />
         </FrameLayout>
         <TextView android:id="@+id/imageViewerError" android:layout_width="280dp" android:layout_height="wrap_content" android:layout_gravity="center" android:background="@drawable/media_badge_bg" android:gravity="center" android:padding="16dp" android:text="图片读取失败" android:textColor="@android:color/white" android:textSize="14sp" android:visibility="gone" />
     </FrameLayout>

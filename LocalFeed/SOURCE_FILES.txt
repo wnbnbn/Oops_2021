@@ -25,6 +25,7 @@ app/src/main/java/com/localfeed/app/ui/AlbumPinchGridTouchListener.kt
 app/src/main/java/com/localfeed/app/ui/AlbumQuery.kt
 app/src/main/java/com/localfeed/app/ui/CardTier.kt
 app/src/main/java/com/localfeed/app/ui/ComicReaderAdapter.kt
+app/src/main/java/com/localfeed/app/ui/ComicReaderZoomTouchListener.kt
 app/src/main/java/com/localfeed/app/ui/FeedProgressView.kt
 app/src/main/java/com/localfeed/app/ui/TaskCenter.kt
 app/src/main/java/com/localfeed/app/ui/TaskCenterAdapter.kt
@@ -40,6 +41,7 @@ app/src/main/res/drawable/ic_launcher_background.xml
 app/src/main/res/drawable/ic_launcher_foreground.xml
 app/src/main/res/drawable/ic_launcher_legacy.xml
 app/src/main/res/drawable/ic_launcher_monochrome.xml
+app/src/main/res/drawable/ic_launcher_monochrome_girl.xml
 app/src/main/res/drawable/ic_more.xml
 app/src/main/res/drawable/ic_star_filled.xml
 app/src/main/res/drawable/ic_star_outline.xml
@@ -60,8 +62,12 @@ app/src/main/res/layout/item_album_header.xml
 app/src/main/res/layout/item_feed.xml
 app/src/main/res/mipmap-anydpi/ic_launcher.xml
 app/src/main/res/mipmap-anydpi/ic_launcher_round.xml
+app/src/main/res/mipmap-anydpi/ic_launcher_round_v064.xml
+app/src/main/res/mipmap-anydpi/ic_launcher_v064.xml
 app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
 app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+app/src/main/res/mipmap-anydpi-v26/ic_launcher_round_v064.xml
+app/src/main/res/mipmap-anydpi-v26/ic_launcher_v064.xml
 app/src/main/res/values/colors.xml
 app/src/main/res/values/strings.xml
 app/src/main/res/values/styles.xml

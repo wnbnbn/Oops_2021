@@ -49,7 +49,7 @@ data class UpsertOutcome(
     val metadataNeeded: Boolean
 )
 
-class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 9) {
+class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 10) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -196,6 +196,12 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         }
         if (oldVersion < 9) {
             db.execSQL("ALTER TABLE media ADD COLUMN special_mark INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 10) {
+            // Older diagnostics treated image-decoder limitations as corrupt media. Problem media
+            // is a video troubleshooting queue, so remove stale image and orphaned rows once.
+            db.execSQL("DELETE FROM media_errors WHERE uri IN (SELECT uri FROM media WHERE kind='IMAGE')")
+            db.execSQL("DELETE FROM media_errors WHERE uri NOT IN (SELECT uri FROM media)")
         }
     }
 
@@ -542,7 +548,13 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
     ).use { c -> readAll(c).firstOrNull() }
 
     fun problems(): List<ProblemMedia> = readableDatabase.rawQuery(
-        "SELECT uri,name,stage,message,updated_at FROM media_errors ORDER BY updated_at DESC", null
+        """
+        SELECT e.uri,e.name,e.stage,e.message,e.updated_at
+        FROM media_errors e
+        INNER JOIN media m ON m.uri=e.uri
+        WHERE m.kind='VIDEO' AND m.hidden=0 AND m.trashed_at=0
+        ORDER BY e.updated_at DESC
+        """.trimIndent(), null
     ).use { c ->
         buildList {
             while (c.moveToNext()) add(ProblemMedia(c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.getLong(4)))

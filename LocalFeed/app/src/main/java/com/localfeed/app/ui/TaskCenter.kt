@@ -7,6 +7,8 @@ import java.util.UUID
 
 enum class TaskState { QUEUED, RUNNING, DONE, FAILED }
 
+enum class TaskOperation { NONE, PERMANENT_DELETE, MOVE_TO_TRASH }
+
 data class MediaTask(
     val id: String,
     val title: String,
@@ -15,7 +17,10 @@ data class MediaTask(
     val progress: Int,
     val total: Int,
     val thumbnailUri: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val operation: TaskOperation = TaskOperation.NONE,
+    val targetIds: List<Long> = emptyList(),
+    val completedIds: Set<Long> = emptySet()
 )
 
 class TaskCenter(context: Context) {
@@ -29,16 +34,58 @@ class TaskCenter(context: Context) {
         commit(); return id
     }
 
+    /** Starts file work whose exact targets survive process death and can be resumed safely. */
+    @Synchronized fun startPersistent(
+        title: String,
+        detail: String,
+        thumbnailUri: String,
+        operation: TaskOperation,
+        targetIds: List<Long>
+    ): String {
+        val id = UUID.randomUUID().toString()
+        val uniqueTargets = targetIds.distinct()
+        tasks.add(0, MediaTask(
+            id, title, detail, TaskState.QUEUED, 0, uniqueTargets.size, thumbnailUri,
+            System.currentTimeMillis(), operation, uniqueTargets
+        ))
+        commit()
+        return id
+    }
+
+    @Synchronized fun markRunning(id: String, detail: String? = null) = mutate(id) {
+        it.copy(
+            detail = detail ?: it.detail,
+            state = TaskState.RUNNING,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    @Synchronized fun markTargetComplete(id: String, targetId: Long, detail: String) = mutate(id) {
+        val completed = it.completedIds + targetId
+        it.copy(
+            detail = detail,
+            state = TaskState.RUNNING,
+            progress = completed.size.coerceAtMost(it.targetIds.size),
+            total = it.targetIds.size,
+            completedIds = completed,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    @Synchronized fun resumable(): List<MediaTask> = tasks.filter {
+        it.operation != TaskOperation.NONE && it.state in setOf(TaskState.QUEUED, TaskState.RUNNING)
+    }
+
     @Synchronized fun update(id: String, detail: String, progress: Int = 0, total: Int = 0) = mutate(id) {
         it.copy(detail = detail, state = TaskState.RUNNING, progress = progress, total = total, updatedAt = System.currentTimeMillis())
     }
 
     @Synchronized fun finish(id: String, detail: String) = mutate(id) {
-        it.copy(detail = detail, state = TaskState.DONE, progress = it.total, updatedAt = System.currentTimeMillis())
+        it.copy(detail = detail, state = TaskState.DONE, progress = it.total, updatedAt = System.currentTimeMillis(), targetIds = emptyList(), completedIds = emptySet())
     }
 
     @Synchronized fun fail(id: String, detail: String) = mutate(id) {
-        it.copy(detail = detail, state = TaskState.FAILED, updatedAt = System.currentTimeMillis())
+        it.copy(detail = detail, state = TaskState.FAILED, updatedAt = System.currentTimeMillis(), targetIds = emptyList(), completedIds = emptySet())
     }
 
     @Synchronized fun snapshot(): List<MediaTask> = tasks.toList()
@@ -59,17 +106,38 @@ class TaskCenter(context: Context) {
         tasks.forEach { t -> array.put(JSONObject().apply {
             put("id", t.id); put("title", t.title); put("detail", t.detail); put("state", t.state.name)
             put("progress", t.progress); put("total", t.total); put("thumbnailUri", t.thumbnailUri); put("updatedAt", t.updatedAt)
+            put("operation", t.operation.name)
+            put("targetIds", JSONArray(t.targetIds))
+            put("completedIds", JSONArray(t.completedIds.toList()))
         }) }
-        prefs.edit().putString("history", array.toString()).apply()
+        // Destructive task progress must be durable before the next file starts.
+        prefs.edit().putString("history", array.toString()).commit()
         listener?.invoke(tasks.toList())
     }
 
     private fun load(): List<MediaTask> = runCatching {
         val array = JSONArray(prefs.getString("history", "[]").orEmpty())
-        buildList { for (i in 0 until array.length()) array.getJSONObject(i).let { o -> add(MediaTask(
-            o.getString("id"), o.getString("title"), o.optString("detail"),
-            runCatching { TaskState.valueOf(o.optString("state")) }.getOrDefault(TaskState.FAILED),
-            o.optInt("progress"), o.optInt("total"), o.optString("thumbnailUri"), o.optLong("updatedAt")
-        )) } }
+        buildList { for (i in 0 until array.length()) array.getJSONObject(i).let { o ->
+            val operation = runCatching { TaskOperation.valueOf(o.optString("operation", "NONE")) }.getOrDefault(TaskOperation.NONE)
+            val savedState = runCatching { TaskState.valueOf(o.optString("state")) }.getOrDefault(TaskState.FAILED)
+            val state = when {
+                savedState != TaskState.RUNNING -> savedState
+                operation != TaskOperation.NONE -> TaskState.QUEUED
+                else -> TaskState.FAILED
+            }
+            val targets = o.optJSONArray("targetIds").toLongList()
+            val completed = o.optJSONArray("completedIds").toLongList().toSet()
+            val detail = if (savedState == TaskState.RUNNING && operation != TaskOperation.NONE) "上次中断 · 等待自动继续" else if (savedState == TaskState.RUNNING) "应用中断 · 此任务未完成" else o.optString("detail")
+            add(MediaTask(
+                o.getString("id"), o.getString("title"), detail, state,
+                completed.size.coerceAtLeast(o.optInt("progress")), targets.size.coerceAtLeast(o.optInt("total")),
+                o.optString("thumbnailUri"), o.optLong("updatedAt"), operation, targets, completed
+            ))
+        } }
     }.getOrDefault(emptyList())
+
+    private fun JSONArray?.toLongList(): List<Long> {
+        if (this == null) return emptyList()
+        return buildList { for (i in 0 until length()) add(optLong(i)) }
+    }
 }

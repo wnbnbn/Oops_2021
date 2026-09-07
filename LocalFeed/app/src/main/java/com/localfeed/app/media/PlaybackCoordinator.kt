@@ -9,12 +9,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
-import androidx.media3.exoplayer.source.preload.TargetPreloadStatusControl
 import androidx.media3.ui.PlayerView
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
-import kotlin.math.abs
 
 @androidx.media3.common.util.UnstableApi
 class PlaybackCoordinator(context: Context) {
@@ -27,23 +24,9 @@ class PlaybackCoordinator(context: Context) {
         fun onPlaybackEnded(mediaId: Long)
     }
 
-    private class TargetControl : TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
-        var current = 0
-        override fun getTargetPreloadStatus(index: Int): DefaultPreloadManager.PreloadStatus {
-            val distance = abs(index - current)
-            return when {
-                distance == 1 -> DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(3_000L)
-                distance == 2 -> DefaultPreloadManager.PreloadStatus.PRELOAD_STATUS_TRACKS_SELECTED
-                distance <= 4 -> DefaultPreloadManager.PreloadStatus.PRELOAD_STATUS_SOURCE_PREPARED
-                else -> DefaultPreloadManager.PreloadStatus.PRELOAD_STATUS_NOT_PRELOADED
-            }
-        }
-    }
-
-    private val target = TargetControl()
-    private val builder = DefaultPreloadManager.Builder(context, target)
-    private val preloadManager = builder.build()
-    val player: ExoPlayer = builder.buildExoPlayer().apply {
+    // Direct MediaItems follow the stable v0.1/v0.4 path. Preloaded SAF sources could outlive a
+    // background deletion and be released while the active page still referenced them.
+    val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         repeatMode = Player.REPEAT_MODE_ONE
         playWhenReady = true
     }
@@ -55,7 +38,6 @@ class PlaybackCoordinator(context: Context) {
     private var currentRecordId: Long = -1L
     private var currentFeedIndex = 0
     private val mapped = HashMap<Long, MediaItem>()
-    private var mappedVideoIds = emptyList<Long>()
     private var released = false
 
     /** User-selected persistent speed. Temporary hold-to-2x never mutates this value. */
@@ -98,29 +80,11 @@ class PlaybackCoordinator(context: Context) {
     }
 
     fun updateQueue(queue: List<MediaRecord>) {
-        val videos = queue.mapIndexedNotNull { index, record ->
-            if (record.kind == MediaKind.VIDEO) index to record else null
+        val validIds = queue.asSequence().filter { it.kind == MediaKind.VIDEO }.map { it.id }.toHashSet()
+        mapped.keys.retainAll(validIds)
+        queue.forEach { record ->
+            if (record.kind == MediaKind.VIDEO && record.id !in mapped) mapped[record.id] = mediaItem(record)
         }
-        val nextIds = videos.map { it.second.id }
-        val appendOnly = nextIds.size >= mappedVideoIds.size &&
-            nextIds.take(mappedVideoIds.size) == mappedVideoIds
-
-        if (!appendOnly) {
-            preloadManager.reset()
-            mapped.clear()
-            mappedVideoIds = emptyList()
-        }
-
-        val newVideos = if (appendOnly) videos.drop(mappedVideoIds.size) else videos
-        if (newVideos.isNotEmpty()) {
-            val items = newVideos.map { (_, record) ->
-                mediaItem(record).also { mapped[record.id] = it }
-            }
-            preloadManager.addMediaItems(items, newVideos.map { it.first })
-        }
-        mappedVideoIds = nextIds
-        preloadManager.setCurrentPlayingIndex(currentFeedIndex)
-        preloadManager.invalidate()
     }
 
     /**
@@ -142,15 +106,11 @@ class PlaybackCoordinator(context: Context) {
         }
         attachTo(view)
         currentFeedIndex = feedIndex
-        target.current = feedIndex
-        preloadManager.setCurrentPlayingIndex(feedIndex)
-        preloadManager.invalidate()
 
         currentRecordId = record.id
         if (changingMedia) {
             val item = mapped[record.id] ?: mediaItem(record)
-            val source = preloadManager.getMediaSource(item)
-            if (source != null) player.setMediaSource(source) else player.setMediaItem(item)
+            player.setMediaItem(item)
             player.prepare()
             if (resumePositionMs > 0L && (record.durationMs <= 0L || resumePositionMs < record.durationMs - 2_000L)) {
                 player.seekTo(resumePositionMs)
@@ -251,7 +211,6 @@ class PlaybackCoordinator(context: Context) {
         currentView?.player = null
         currentView = null
         player.release()
-        preloadManager.release()
     }
 
     private fun applyEffectiveSpeed() {
