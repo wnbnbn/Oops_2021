@@ -1,4 +1,4 @@
-name: LocalFeed v0.7.2 Compile and Release
+name: LocalFeed v0.7.3 Compile and Release
 
 permissions:
   contents: write
@@ -34,18 +34,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Verify tracked v0.7.2 source
+      - name: Verify tracked v0.7.3 source
         run: python3 localfeed_ci/verify_v05_source.py
       - name: Pure Kotlin regression tests
         working-directory: LocalFeed
         run: bash tools/run-smoke-tests.sh
-      - name: Assemble v0.7.2
+      - name: Assemble v0.7.3
         working-directory: LocalFeed
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - name: Re-sign APK with fixed key
         run: |
           IN=LocalFeed/app/build/outputs/apk/debug/app-debug.apk
-          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.2-fixed-signature.apk
+          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.3-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks "$HOME/.android/debug.keystore" \
             --ks-key-alias androiddebugkey \
@@ -55,7 +55,7 @@ jobs:
             "$IN"
       - name: Verify fixed certificate
         run: |
-          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.2-fixed-signature.apk
+          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.3-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
           ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
           EXPECTED=2fcf7ed9c4823aa9589c53102b559de274b7ab84f636ded79957aa88746ab7a6
@@ -64,10 +64,10 @@ jobs:
       - name: Package verified deliverables
         run: |
           mkdir -p dist
-          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.2-fixed-signature.apk dist/LocalFeed-v0.7.2.apk
-          sha256sum dist/LocalFeed-v0.7.2.apk > dist/SHA256SUMS.txt
+          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.7.3-fixed-signature.apk dist/LocalFeed-v0.7.3.apk
+          sha256sum dist/LocalFeed-v0.7.3.apk > dist/SHA256SUMS.txt
           {
-            echo "LocalFeed v0.7.2 / versionCode 14"
+            echo "LocalFeed v0.7.3 / versionCode 15"
             echo "Source commit: $GITHUB_SHA"
             echo "CI run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Source integrity, uniform/optional-bias feed, FeedSession, AlbumQuery, scanner smoke: PASS"
@@ -79,26 +79,26 @@ jobs:
           from pathlib import Path
           import json, zipfile
           paths = list(json.loads(Path('localfeed_ci/v05_source_sha256.json').read_text()))
-          paths += ['localfeed_ci/v05_source_sha256.json', 'localfeed_ci/verify_v05_source.py', 'localfeed_ci/stable_debug_keystore.b64', 'localfeed_ci/update.json', '.github/workflows/localfeed-v05-compile.yml']
-          with zipfile.ZipFile('dist/LocalFeed-v0.7.2-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+          paths += ['README.md', 'localfeed_ci/v05_source_sha256.json', 'localfeed_ci/verify_v05_source.py', 'localfeed_ci/stable_debug_keystore.b64', 'localfeed_ci/update.json', '.github/workflows/localfeed-v05-compile.yml']
+          with zipfile.ZipFile('dist/LocalFeed-v0.7.3-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
               for name in paths: archive.write(name, name)
               archive.write('dist/BUILD_REPORT.txt', 'BUILD_REPORT.txt')
           PYZIP
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.7.2-fixed-signature-apk
+          name: LocalFeed-v0.7.3-fixed-signature-apk
           path: dist/*
           if-no-files-found: error
       - name: Publish in-app update release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view localfeed-v0.7.2 >/dev/null 2>&1; then
-            gh release upload localfeed-v0.7.2 dist/LocalFeed-v0.7.2.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt --clobber
+          if gh release view localfeed-v0.7.3 >/dev/null 2>&1; then
+            gh release upload localfeed-v0.7.3 dist/LocalFeed-v0.7.3.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt --clobber
           else
-            gh release create localfeed-v0.7.2 dist/LocalFeed-v0.7.2.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt \
-              --title "LocalFeed v0.7.2" \
-              --notes "紧急修复视频首帧被缩略图覆盖、超大媒体库 CursorWindow 扫描失败，并改善分类切换和图片手势。" \
+            gh release create localfeed-v0.7.3 dist/LocalFeed-v0.7.3.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt \
+              --title "LocalFeed v0.7.3" \
+              --notes "修复快速连续切换时当前视频缩略图硬闪，并用真正的分页快照读取解决超大媒体库 CursorWindow 扫描失败；补齐完整项目接手文档。" \
               --latest
           fi

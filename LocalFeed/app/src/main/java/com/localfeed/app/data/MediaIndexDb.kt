@@ -51,6 +51,7 @@ data class UpsertOutcome(
 
 class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 10) {
     companion object {
+        private const val RECORD_PAGE_SIZE = 200
         // Never use SELECT * for gallery rows. visual_hashes and full_hash can make individual
         // rows large enough to exhaust Android's CursorWindow in a multi-thousand-file library.
         private val RECORD_COLUMNS = listOf(
@@ -356,13 +357,15 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         writableDatabase.update("media", cv, "uri=?", arrayOf(uri))
     }
 
-    fun allVisible(): List<MediaRecord> = readableDatabase.rawQuery(
-        "SELECT $RECORD_COLUMNS FROM media WHERE hidden=0 AND trashed_at=0 ORDER BY added_at DESC, id DESC", null
-    ).use(::readAll)
+    fun allVisible(): List<MediaRecord> = readPaged(
+        where = "hidden=0 AND trashed_at=0",
+        orderBy = "added_at DESC, id DESC"
+    )
 
-    fun allTrashed(): List<MediaRecord> = readableDatabase.rawQuery(
-        "SELECT $RECORD_COLUMNS FROM media WHERE trashed_at>0 ORDER BY trashed_at DESC", null
-    ).use(::readAll)
+    fun allTrashed(): List<MediaRecord> = readPaged(
+        where = "trashed_at>0",
+        orderBy = "trashed_at DESC, id DESC"
+    )
 
     fun recordById(id: Long): MediaRecord? = readableDatabase.rawQuery(
         "SELECT $RECORD_COLUMNS FROM media WHERE id=?", arrayOf(id.toString())
@@ -578,6 +581,24 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
             val args = chunk.map { it.toString() }.toTypedArray()
             val cv = ContentValues().apply { put(column, value) }
             writableDatabase.update("media", cv, "id IN ($marks)", args)
+        }
+    }
+
+    /**
+     * Android CursorWindow has a small process-wide native allocation. Even a projection without
+     * hash columns can fail when thousands of SAF URI/path strings are loaded in one window while
+     * image decoding is active. Close every small cursor before opening the next page.
+     */
+    private fun readPaged(where: String, orderBy: String): List<MediaRecord> = buildList {
+        var offset = 0
+        while (true) {
+            val page = readableDatabase.rawQuery(
+                "SELECT $RECORD_COLUMNS FROM media WHERE $where ORDER BY $orderBy LIMIT $RECORD_PAGE_SIZE OFFSET $offset",
+                null
+            ).use(::readAll)
+            addAll(page)
+            if (page.size < RECORD_PAGE_SIZE) break
+            offset += page.size
         }
     }
 

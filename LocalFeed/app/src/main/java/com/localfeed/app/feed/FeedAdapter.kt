@@ -167,10 +167,20 @@ class FeedAdapter(
     }
 
     fun showFirstFrame(mediaId: Long) {
-        bound[mediaId]?.get()?.binding?.let { binding ->
+        val holder = bound[mediaId]?.get() ?: return
+        holder.binding.let { binding ->
             binding.playerView.animate().cancel()
             binding.playerView.alpha = 1f
-            binding.imageView.visibility = View.GONE
+            // The poster belongs to the current video, but an immediate GONE still reads as a
+            // one-frame flash during a fast fling. Cross-fade only after the decoder owns a frame.
+            binding.imageView.animate().cancel()
+            binding.imageView.animate()
+                .alpha(0f)
+                .setDuration(90L)
+                .withEndAction {
+                    if (holder.boundId == mediaId) binding.imageView.visibility = View.GONE
+                }
+                .start()
         }
     }
 
@@ -178,6 +188,7 @@ class FeedAdapter(
         bound[mediaId]?.get()?.binding?.let { binding ->
             binding.playerView.alpha = 0f
             binding.imageView.visibility = View.VISIBLE
+            binding.imageView.alpha = 1f
             binding.playbackErrorBadge.apply {
                 text = "这个视频无法正常播放\n$message\n\n文件保留在当前页，可用右侧“更多”查看信息、外部打开或删除"
                 visibility = View.VISIBLE
@@ -374,6 +385,8 @@ class FeedAdapter(
 
         fun bind(item: MediaRecord) {
             cancelTransientGesture()
+            binding.imageView.animate().cancel()
+            binding.imageView.alpha = 1f
             boundId?.let { old -> if (bound[old]?.get() === this) bound.remove(old) }
             boundId = item.id
             bound[item.id] = WeakReference(this)

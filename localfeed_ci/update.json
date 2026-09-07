@@ -1,6 +1,6 @@
 {
-  "version": "0.7.2",
-  "notes": "紧急修复视频首帧被缩略图覆盖、超大媒体库 CursorWindow 扫描失败，并改善分类切换和图片手势。",
-  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.2/LocalFeed-v0.7.2.apk",
-  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.2/SHA256SUMS.txt"
+  "version": "0.7.3",
+  "notes": "修复快速连续切换时当前视频缩略图硬闪，并用真正的分页快照读取解决超大媒体库 CursorWindow 扫描失败；补齐完整项目接手文档。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.3/LocalFeed-v0.7.3.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.3/SHA256SUMS.txt"
 }

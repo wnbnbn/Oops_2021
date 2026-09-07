@@ -196,13 +196,14 @@ class MediaRepository(private val context: Context) {
                 try {
                     if (run != generation.get()) return@execute
                     val scanner = TreeScanner(context, db)
-                    val meta = storageLock.withLock {
-                        scanner.enrichMetadata(allTasks) { done, total ->
+                    val (meta, visible) = storageLock.withLock {
+                        val result = scanner.enrichMetadata(allTasks) { done, total ->
                             if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
                         }
+                        result to db.allVisible()
                     }
                     if (run == generation.get()) onMetadataDone(
-                        db.allVisible(),
+                        visible,
                         indexedSummary.copy(
                             metadataErrors = meta.errors,
                             newFileErrors = meta.newFileErrors,
