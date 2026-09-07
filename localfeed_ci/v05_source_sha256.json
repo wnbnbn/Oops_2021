@@ -4,7 +4,7 @@
   "LocalFeed/README.md": "c533625cf67896d3f7bf86fe484a27aeb5a6abf17186212bffe2e7879284e590",
   "LocalFeed/SOURCE_FILES.txt": "7151c67b960c4d66bb21f9c8bacde2d893a05fb573a31353971a6cad2292487e",
   "LocalFeed/TEST_REPORT.md": "b53e7fddea312b89b14c8cc56dbe57d6b1dff9e7bd26b8a46f8aa12923eff6b5",
-  "LocalFeed/app/build.gradle.kts": "573d51e6df1a0d22908e7b0eaa3b354c12a3003d1f929bf87247ddb571a066b5",
+  "LocalFeed/app/build.gradle.kts": "99041ebfb97c4cf0b7080fec9fe0b88eed0bd0f8655cc80a46a82ac241875c0d",
   "LocalFeed/app/src/main/AndroidManifest.xml": "048f5b6f628f916c13a7a48a411a917dd7fa57088b87c888234c39cc8d289f73",
   "LocalFeed/app/src/main/java/com/localfeed/app/MainActivity.kt": "738c22dfac548f5592e3d5c4af1b07c634abcaf5f07e37d4f53e3e8d1f3cd6de",
   "LocalFeed/app/src/main/java/com/localfeed/app/core/MediaRecord.kt": "7507a5564201b72e060064e2b28280143475c688095df74c40226588b1c3fb38",
