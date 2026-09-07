@@ -58,10 +58,16 @@ class FeedAdapter(
     private var bottomSafeInsetPx: Int = 0
     private var globalFillMode: Boolean = true
     private var actionRailBottomPx: Int = 0
+    private var actionOpacity = 0.82f
 
     fun setActionRailBottom(value: Int) {
         actionRailBottomPx = value.coerceAtLeast(0)
         bound.values.forEach { it.get()?.applyActionRailPosition() }
+    }
+
+    fun setActionOpacity(value: Float) {
+        actionOpacity = value.coerceIn(0.3f, 1f)
+        bound.values.forEach { it.get()?.binding?.rightActions?.alpha = actionOpacity }
     }
 
     fun setGlobalFillMode(value: Boolean) {
@@ -218,6 +224,7 @@ class FeedAdapter(
         private var longPressLocked = false
         private var lockedIndicatorVisible = false
         private var cancelLockedGesture = false
+        private var lockCanceledThisGesture = false
         private var suppressSingleTapUntil = 0L
 
         private val detector = GestureDetector(binding.root.context, object : GestureDetector.SimpleOnGestureListener() {
@@ -247,6 +254,7 @@ class FeedAdapter(
                 if (itemAt(p).kind == MediaKind.VIDEO && !scrubbing && !longPressed) {
                     longPressed = true
                     cancelLockedGesture = callbacks.isLockedSpeed(p)
+                    lockCanceledThisGesture = false
                     longPressLocked = false
                     longPressStartY = e.y
                     binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(true)
@@ -308,6 +316,7 @@ class FeedAdapter(
                             val p = safePosition()
                             if (p != null) {
                                 cancelLockedGesture = false
+                                lockCanceledThisGesture = true
                                 lockedIndicatorVisible = false
                                 binding.speedBadge.text = "2.0× 已取消"
                                 binding.speedBadge.postDelayed({ if (!lockedIndicatorVisible) binding.speedBadge.visibility = View.GONE }, 500L)
@@ -315,7 +324,7 @@ class FeedAdapter(
                                 // leaks the remaining downward motion into ViewPager2.
                                 callbacks.onLockedSpeedCancel(p)
                             }
-                        } else if (longPressed && !longPressLocked && dy > density * 88f) {
+                        } else if (longPressed && !lockCanceledThisGesture && !longPressLocked && dy > density * 88f) {
                             val p = safePosition()
                             if (p != null) {
                                 longPressLocked = true
@@ -444,6 +453,7 @@ class FeedAdapter(
         }
 
         fun applyActionRailPosition() {
+            binding.rightActions.alpha = actionOpacity
             if (actionRailBottomPx <= 0) return
             (binding.rightActions.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                 if (lp.bottomMargin != actionRailBottomPx) {
@@ -494,6 +504,12 @@ class FeedAdapter(
                     lockedIndicatorVisible = false
                     binding.speedBadge.visibility = View.GONE
                 }
+                return
+            }
+            if (lockCanceledThisGesture) {
+                lockCanceledThisGesture = false
+                lockedIndicatorVisible = false
+                binding.speedBadge.visibility = View.GONE
                 return
             }
             if (!longPressLocked) {

@@ -20,7 +20,8 @@ data class AlbumQueryState(
     val sort: AlbumSort = AlbumSort.ADDED_TIME,
     val descending: Boolean = true,
     val grouping: TimeGrouping = TimeGrouping.ADDED_DAY,
-    val randomSeed: Long = 0x4C6F63616C466565L
+    val randomSeed: Long = 0x4C6F63616C466565L,
+    val collectionThreshold: Int = 6
 )
 
 object AlbumQueryEngine {
@@ -63,7 +64,7 @@ object AlbumQueryEngine {
             AlbumSpecial.UNSEEN -> result.filter { it.showCount == 0 }
             AlbumSpecial.LIKED -> result.filter { it.liked }
             AlbumSpecial.FAVORITE -> result.filter { it.favorited }
-            AlbumSpecial.COLLECTION -> result.filter { it.likeCount >= 6 }
+            AlbumSpecial.COLLECTION -> result.filter { it.likeCount >= state.collectionThreshold }
             AlbumSpecial.PROBLEM -> result.filter { it.id in problemIds }
             AlbumSpecial.LARGE -> result.filter { it.size >= 500L * 1024 * 1024 }
             AlbumSpecial.DUPLICATE -> result.filter { it.id in duplicateIds }

@@ -12,12 +12,17 @@ import android.graphics.drawable.Drawable
 
 data class CardTier(val level: Int, val title: String, val color: Int, val widthDp: Float, val badge: String) {
     companion object {
+        private var limits = intArrayOf(1, 3, 6, 12, 25)
+        fun configure(values: IntArray) {
+            if (values.size == 5 && (0 until values.lastIndex).all { values[it] < values[it + 1] }) limits = values.copyOf()
+        }
+        fun thresholds(): IntArray = limits.copyOf()
         fun forCount(count: Int): CardTier = when {
-            count >= 25 -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.5f, "典藏 $count")
-            count >= 12 -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2f, "幻彩 $count")
-            count >= 6 -> CardTier(3, "金耀", Color.rgb(242, 190, 61), 2f, "金耀 $count")
-            count >= 3 -> CardTier(2, "银曜", Color.rgb(159, 199, 224), 1.5f, "银曜 $count")
-            count >= 1 -> CardTier(1, "铜辉", Color.rgb(194, 119, 74), 1.5f, "铜辉 $count")
+            count >= limits[4] -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.5f, "典藏 $count")
+            count >= limits[3] -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2f, "幻彩 $count")
+            count >= limits[2] -> CardTier(3, "金耀", Color.rgb(242, 190, 61), 2f, "金耀 $count")
+            count >= limits[1] -> CardTier(2, "银曜", Color.rgb(159, 199, 224), 1.5f, "银曜 $count")
+            count >= limits[0] -> CardTier(1, "铜辉", Color.rgb(194, 119, 74), 1.5f, "铜辉 $count")
             else -> CardTier(0, "普通", Color.rgb(82, 82, 86), 1f, "")
         }
 

@@ -18,6 +18,7 @@ data class MediaRecord(
     val rotation: Int = 0,
     val liked: Boolean = false,
     val likeCount: Int = 0,
+    val specialMark: Boolean = false,
     val favorited: Boolean = false,
     val lastShownAt: Long = 0L,
     val showCount: Int = 0,

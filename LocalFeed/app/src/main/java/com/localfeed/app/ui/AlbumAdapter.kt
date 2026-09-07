@@ -1,8 +1,10 @@
 package com.localfeed.app.ui
 
+import android.animation.ObjectAnimator
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
@@ -198,7 +200,13 @@ class AlbumAdapter(
         }
     }
 
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+        (holder as? MediaHolder)?.recycle()
+        super.onViewRecycled(holder)
+    }
+
     inner class MediaHolder(private val b: ItemAlbumBinding) : RecyclerView.ViewHolder(b.root) {
+        private var specialAnimator: ObjectAnimator? = null
         init {
             b.root.setOnClickListener {
                 val p = bindingAdapterPosition
@@ -227,11 +235,35 @@ class AlbumAdapter(
             b.stateBadge.visibility = if (b.stateBadge.text.isNullOrBlank()) View.GONE else View.VISIBLE
             b.currentBadge.visibility = if (item.id == highlightedMediaId) View.VISIBLE else View.GONE
             val tier = CardTier.forCount(item.likeCount)
-            b.cardFrame.background = CardTier.frame(item.likeCount, b.root.resources.displayMetrics.density)
+            b.cardFrame.background = if (item.id == highlightedMediaId) {
+                android.graphics.drawable.GradientDrawable().apply {
+                    setColor(android.graphics.Color.TRANSPARENT)
+                    cornerRadius = 5f * b.root.resources.displayMetrics.density
+                    setStroke((3f * b.root.resources.displayMetrics.density).toInt(), 0xFFFF725E.toInt())
+                }
+            } else CardTier.frame(item.likeCount, b.root.resources.displayMetrics.density)
             b.tierBadge.text = tier.badge
             b.tierBadge.setTextColor(tier.color)
             b.tierBadge.visibility = if (tier.badge.isBlank()) View.GONE else View.VISIBLE
             b.problemBadge.visibility = if (item.id in problemIds) View.VISIBLE else View.GONE
+            b.specialBadge.visibility = if (item.specialMark) View.VISIBLE else View.GONE
+            specialAnimator?.cancel()
+            specialAnimator = null
+            b.specialBadge.rotation = 0f
+            if (item.specialMark) {
+                specialAnimator = ObjectAnimator.ofFloat(b.specialBadge, View.ROTATION, 0f, 360f).apply {
+                    duration = 4200L
+                    repeatCount = ObjectAnimator.INFINITE
+                    interpolator = LinearInterpolator()
+                    start()
+                }
+            }
+        }
+
+        fun recycle() {
+            specialAnimator?.cancel()
+            specialAnimator = null
+            b.specialBadge.rotation = 0f
         }
 
         fun bindSelection(value: Boolean) {

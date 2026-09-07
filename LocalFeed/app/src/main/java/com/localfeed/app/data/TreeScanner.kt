@@ -128,11 +128,18 @@ class TreeScanner(
             try {
                 val meta = if (task.kind == MediaKind.VIDEO) videoMetadata(task.uri) else imageMetadata(resolver, task.uri)
                 db.updateMetadata(task.uri.toString(), meta.durationMs, meta.width, meta.height, meta.rotation)
-                db.clearError(task.uri.toString(), "元数据")
+                if (task.kind == MediaKind.IMAGE) db.clearError(task.uri.toString())
+                else db.clearError(task.uri.toString(), "元数据")
             } catch (e: Exception) {
-                errors++
-                if (task.isNew) newFileErrors++
-                db.recordError(task.uri.toString(), task.name, "元数据", e.javaClass.simpleName + ": " + (e.message ?: "读取失败"))
+                if (task.kind == MediaKind.VIDEO) {
+                    errors++
+                    if (task.isNew) newFileErrors++
+                    db.recordError(task.uri.toString(), task.name, "元数据", e.javaClass.simpleName + ": " + (e.message ?: "读取失败"))
+                } else {
+                    // Animated/modern image formats are often displayable by ImageDecoder even
+                    // when BitmapFactory cannot expose metadata. Do not mislabel them as broken.
+                    db.clearError(task.uri.toString())
+                }
             }
             if ((index + 1) % 25 == 0 || index == tasks.lastIndex) onProgress(index + 1, tasks.size)
         }

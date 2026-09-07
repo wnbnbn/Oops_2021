@@ -142,19 +142,6 @@
                 <TextView android:id="@+id/selectionDelete" style="@style/SelectionAction" android:text="删除" android:textColor="#FFFF6B6B" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/scanStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#161616"
-                android:paddingStart="12dp"
-                android:paddingTop="7dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="7dp"
-                android:textColor="#B3FFFFFF"
-                android:textSize="12sp"
-                android:visibility="gone" />
-
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/albumGrid"
                 android:layout_width="match_parent"
@@ -163,6 +150,26 @@
                 android:clipToPadding="false"
                 android:paddingBottom="52dp" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/scanStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="102dp"
+            android:layout_marginEnd="20dp"
+            android:background="@drawable/transient_status_bg"
+            android:elevation="8dp"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:textColor="#E6FFFFFF"
+            android:textSize="12sp"
+            android:visibility="gone" />
 
         <LinearLayout
             android:id="@+id/emptyState"
@@ -191,15 +198,44 @@
             android:layout_height="match_parent"
             android:background="@android:color/black"
             android:clipToPadding="false"
-            android:paddingTop="56dp"
-            android:paddingBottom="28dp"
             android:visibility="gone" />
-        <TextView android:id="@+id/imageViewerBack" android:layout_width="52dp" android:layout_height="52dp" android:layout_gravity="start|top" android:gravity="center" android:text="‹" android:textColor="@android:color/white" android:textSize="40sp" />
-        <TextView android:id="@+id/imageViewerDelete" android:layout_width="52dp" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="10dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:text="删除" android:textColor="#FFFF7777" android:textSize="13sp" />
-        <TextView android:id="@+id/imageViewerOpenWith" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="132dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:text="其他应用" android:textColor="@android:color/white" android:textSize="13sp" />
-        <TextView android:id="@+id/imageViewerMode" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="70dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:paddingStart="13dp" android:paddingEnd="13dp" android:text="连续阅读" android:textColor="@android:color/white" android:textSize="13sp" />
+        <FrameLayout
+            android:id="@+id/imageViewerChrome"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+            <LinearLayout
+                android:id="@+id/imageViewerTopBar"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:layout_gravity="top"
+                android:background="@drawable/reader_top_gradient"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
+                <TextView android:id="@+id/imageViewerBack" style="@style/ReaderIconButton" android:text="‹" android:textSize="34sp" />
+                <TextView android:id="@+id/imageViewerName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_weight="1" android:ellipsize="middle" android:maxLines="1" android:textColor="#EFFFFFFF" android:textSize="13sp" />
+                <TextView android:id="@+id/imageViewerOpenWith" style="@style/ReaderIconButton" android:text="↗" android:textSize="20sp" />
+                <TextView android:id="@+id/imageViewerDelete" style="@style/ReaderIconButton" android:layout_marginStart="8dp" android:text="⌫" android:textColor="#FFFF8A80" android:textSize="20sp" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/imageViewerBottomBar"
+                android:layout_width="wrap_content"
+                android:layout_height="52dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="22dp"
+                android:background="@drawable/reader_control_bar_bg"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+                <TextView android:id="@+id/imageViewerMode" style="@style/ReaderTextButton" android:text="连续阅读" />
+                <View android:layout_width="1dp" android:layout_height="22dp" android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:background="#2FFFFFFF" />
+                <TextView android:id="@+id/imageViewerShuffle" style="@style/ReaderTextButton" android:text="洗牌" />
+            </LinearLayout>
+        </FrameLayout>
         <TextView android:id="@+id/imageViewerError" android:layout_width="280dp" android:layout_height="wrap_content" android:layout_gravity="center" android:background="@drawable/media_badge_bg" android:gravity="center" android:padding="16dp" android:text="图片读取失败" android:textColor="@android:color/white" android:textSize="14sp" android:visibility="gone" />
-        <TextView android:id="@+id/imageViewerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="start|bottom" android:layout_marginStart="14dp" android:layout_marginEnd="14dp" android:layout_marginBottom="18dp" android:ellipsize="middle" android:maxLines="1" android:textColor="#D9FFFFFF" android:textSize="13sp" />
     </FrameLayout>
 
     <FrameLayout

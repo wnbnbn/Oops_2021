@@ -14,8 +14,10 @@ class FeedSession(source: List<MediaRecord>) {
     private var source = source.filter { it.kind == MediaKind.VIDEO && !it.hidden }
     private val engine = WeightedFeedEngine(this.source)
     val queue = mutableListOf<MediaRecord>()
+    private var orderedMode = false
 
     fun rebuild(first: MediaRecord? = null, count: Int = 50) {
+        orderedMode = false
         queue.clear()
         engine.resetRecent()
         if (first != null && first.kind == MediaKind.VIDEO && !first.hidden) {
@@ -24,6 +26,14 @@ class FeedSession(source: List<MediaRecord>) {
         }
         append(count - queue.size)
     }
+
+    fun rebuildOrdered(items: List<MediaRecord>) {
+        orderedMode = true
+        queue.clear()
+        queue += items.filter { it.kind == MediaKind.VIDEO && !it.hidden }
+    }
+
+    fun isOrdered(): Boolean = orderedMode
 
     fun replaceSource(newSource: List<MediaRecord>) {
         source = newSource.filter { it.kind == MediaKind.VIDEO && !it.hidden }
@@ -47,6 +57,7 @@ class FeedSession(source: List<MediaRecord>) {
     }
 
     fun ensureAhead(position: Int, minAhead: Int = 20): Int {
+        if (orderedMode) return 0
         val oldSize = queue.size
         if (queue.size - position < minAhead) append(30)
         return queue.size - oldSize
@@ -63,6 +74,7 @@ class FeedSession(source: List<MediaRecord>) {
     }
 
     private fun append(count: Int) {
+        if (orderedMode) return
         repeat(count.coerceAtLeast(0)) {
             val next = engine.next() ?: return
             queue += next

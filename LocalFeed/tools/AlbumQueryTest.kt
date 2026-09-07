@@ -20,5 +20,8 @@ fun main() {
     check(folderFavLandscape.map { it.id } == listOf(2L))
     val dup = AlbumQueryEngine.apply(src, AlbumQueryState(special=AlbumSpecial.DUPLICATE),600_000,setOf(1L,3L))
     check(dup.map { it.id }.toSet() == setOf(1L,3L))
+    val collectionSrc = src + video(5,"c/five.mp4",60_000).copy(liked=true, likeCount=7)
+    val collection = AlbumQueryEngine.apply(collectionSrc, AlbumQueryState(special=AlbumSpecial.COLLECTION, collectionThreshold=7),600_000,emptySet())
+    check(collection.map { it.id } == listOf(5L))
     println("album-query test=PASS")
 }

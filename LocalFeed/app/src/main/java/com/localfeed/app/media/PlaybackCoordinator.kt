@@ -135,6 +135,11 @@ class PlaybackCoordinator(context: Context) {
 
         val changingMedia = currentRecordId != record.id || player.currentMediaItem?.mediaId != record.id.toString()
         if (changingMedia) cancelTemporaryBoost()
+        if (changingMedia) {
+            currentView?.player = null
+            currentView = null
+            player.clearVideoSurface()
+        }
         attachTo(view)
         currentFeedIndex = feedIndex
         target.current = feedIndex

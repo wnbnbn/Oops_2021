@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
 import android.util.LruCache
 import android.widget.ImageView
 import com.localfeed.app.core.MediaKind
@@ -37,6 +40,10 @@ class ThumbnailLoader(private val context: Context) {
     fun load(record: MediaRecord, view: ImageView, targetPx: Int = 720, onResult: ((Boolean) -> Unit)? = null) {
         val key = "${record.uri}|${record.size}|$targetPx"
         jobs.remove(view)?.cancel(false)
+        if (record.kind == MediaKind.IMAGE && targetPx >= 1200 && Build.VERSION.SDK_INT >= 28) {
+            loadFullImageDrawable(record, view, targetPx, key, onResult)
+            return
+        }
         memory.get(key)?.let {
             view.tag = key
             view.setImageBitmap(it)
@@ -64,6 +71,29 @@ class ThumbnailLoader(private val context: Context) {
                 if (view.tag == key) {
                     view.setImageBitmap(bitmap)
                     onResult?.invoke(true)
+                }
+                jobs.remove(view)
+            }
+        }
+        jobs[view] = future
+    }
+
+    private fun loadFullImageDrawable(record: MediaRecord, view: ImageView, targetPx: Int, key: String, onResult: ((Boolean) -> Unit)?) {
+        view.tag = key
+        view.setImageDrawable(null)
+        val future = executor.submit {
+            val drawable = runCatching {
+                val source = ImageDecoder.createSource(context.contentResolver, Uri.parse(record.uri))
+                ImageDecoder.decodeDrawable(source) { decoder, info, _ ->
+                    val largest = max(info.size.width, info.size.height).coerceAtLeast(1)
+                    if (largest > targetPx * 2) decoder.setTargetSampleSize((largest / (targetPx * 2)).coerceAtLeast(1))
+                }
+            }.getOrNull()
+            view.post {
+                if (view.tag == key) {
+                    view.setImageDrawable(drawable)
+                    (drawable as? AnimatedImageDrawable)?.apply { repeatCount = AnimatedImageDrawable.REPEAT_INFINITE; start() }
+                    onResult?.invoke(drawable != null)
                 }
                 jobs.remove(view)
             }

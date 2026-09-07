@@ -7,6 +7,10 @@ assert actual_paths == set(manifest), (actual_paths - set(manifest), set(manifes
 for name, expected in manifest.items():
     raw = (root / name).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == expected, name
+    if Path(name).suffix.lower() in {".png", ".webp", ".jpg", ".jpeg"}:
+        if name.lower().endswith(".png"):
+            assert raw.startswith(b"\x89PNG\r\n\x1a\n"), name
+        continue
     text = raw.decode("utf-8", errors="strict")
     assert "\ufffd" not in text and "\x00" not in text, name
-print(f"Source integrity: PASS ({len(manifest)} files, SHA256 and strict UTF-8)")
+print(f"Source integrity: PASS ({len(manifest)} files, SHA256; text strict UTF-8)")

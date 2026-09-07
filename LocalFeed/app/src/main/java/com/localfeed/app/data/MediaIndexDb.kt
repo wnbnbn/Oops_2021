@@ -49,7 +49,7 @@ data class UpsertOutcome(
     val metadataNeeded: Boolean
 )
 
-class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 8) {
+class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 9) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -69,6 +69,7 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
                 rotation INTEGER NOT NULL DEFAULT 0,
                 liked INTEGER NOT NULL DEFAULT 0,
                 like_count INTEGER NOT NULL DEFAULT 0,
+                special_mark INTEGER NOT NULL DEFAULT 0,
                 favorited INTEGER NOT NULL DEFAULT 0,
                 last_shown_at INTEGER NOT NULL DEFAULT 0,
                 show_count INTEGER NOT NULL DEFAULT 0,
@@ -192,6 +193,9 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         if (oldVersion < 8) {
             db.execSQL("ALTER TABLE media ADD COLUMN like_count INTEGER NOT NULL DEFAULT 0")
             db.execSQL("UPDATE media SET like_count=1 WHERE liked=1 AND like_count=0")
+        }
+        if (oldVersion < 9) {
+            db.execSQL("ALTER TABLE media ADD COLUMN special_mark INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -365,6 +369,11 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
     }
 
+    fun setSpecialMark(id: Long, marked: Boolean) {
+        val cv = ContentValues().apply { put("special_mark", if (marked) 1 else 0) }
+        writableDatabase.update("media", cv, "id=?", arrayOf(id.toString()))
+    }
+
     fun setLikedMany(ids: Collection<Long>, liked: Boolean) = updateMany(ids, "liked", if (liked) 1 else 0)
 
     fun setFavorited(id: Long, favorited: Boolean) {
@@ -390,7 +399,7 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         val marks = allIds.joinToString(",") { "?" }
         val args = allIds.map { it.toString() }.toTypedArray()
         readableDatabase.rawQuery(
-            "SELECT MAX(liked),MAX(favorited),MAX(last_shown_at),SUM(show_count),MAX(playback_position_ms),SUM(like_count) FROM media WHERE id IN ($marks)",
+            "SELECT MAX(liked),MAX(favorited),MAX(last_shown_at),SUM(show_count),MAX(playback_position_ms),SUM(like_count),MAX(special_mark) FROM media WHERE id IN ($marks)",
             args
         ).use { c ->
             if (!c.moveToFirst()) return
@@ -398,6 +407,7 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
                 put("liked", c.getInt(0)); put("favorited", c.getInt(1)); put("last_shown_at", c.getLong(2))
                 put("show_count", c.getInt(3)); put("playback_position_ms", c.getLong(4))
                 put("like_count", c.getInt(5)); put("liked", if (c.getInt(5) > 0) 1 else 0)
+                put("special_mark", c.getInt(6))
             }
             writableDatabase.update("media", cv, "id=?", arrayOf(keepId.toString()))
         }
@@ -568,6 +578,7 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
                 rotation = c.getInt(idx.getValue("rotation")),
                 liked = c.getInt(idx.getValue("liked")) != 0,
                 likeCount = idx["like_count"]?.let(c::getInt) ?: if (c.getInt(idx.getValue("liked")) != 0) 1 else 0,
+                specialMark = idx["special_mark"]?.let { c.getInt(it) != 0 } ?: false,
                 favorited = c.getInt(idx.getValue("favorited")) != 0,
                 lastShownAt = c.getLong(idx.getValue("last_shown_at")),
                 showCount = c.getInt(idx.getValue("show_count")),

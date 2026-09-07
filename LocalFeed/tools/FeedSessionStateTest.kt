@@ -44,5 +44,13 @@ fun main() {
     val added = session.ensureAhead(position = before - 1, minAhead = 20)
     check(added > 0)
     check(session.queue.drop(before).all { it.kind == MediaKind.VIDEO })
+
+    val ordered = listOf(videos[7], videos[2], videos[19])
+    session.rebuildOrdered(ordered)
+    check(session.isOrdered())
+    check(session.queue.map { it.id } == ordered.map { it.id })
+    val orderedSize = session.queue.size
+    check(session.ensureAhead(orderedSize - 1) == 0)
+    check(session.queue.size == orderedSize) { "ordered album playback must not append random media" }
     println("feed-session state test=PASS queue=${session.queue.size}")
 }

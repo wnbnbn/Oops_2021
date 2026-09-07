@@ -11,6 +11,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.SeekBar
 import android.widget.Toast
+import android.text.Editable
+import android.text.TextWatcher
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -97,6 +99,15 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private var backgroundedAt = 0L
     private var randomPreferences = RandomPreferences()
     private var actionRailBottomDp = 170
+    private var actionOpacityPercent = 82
+    private val imageChromeHide = Runnable {
+        if (::b.isInitialized && b.imageViewerPanel.visibility == View.VISIBLE) {
+            b.imageViewerChrome.animate().alpha(0f).setDuration(180L).withEndAction {
+                b.imageViewerChrome.visibility = View.GONE
+                b.imageViewerChrome.alpha = 1f
+            }.start()
+        }
+    }
 
     private val prefs by lazy { getSharedPreferences("localfeed_ui", MODE_PRIVATE) }
 
@@ -146,13 +157,13 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         playback = PlaybackCoordinator(this).also { it.listener = this }
         feedAdapter = FeedAdapter(thumbnails, this)
         taskCenter = TaskCenter(this)
-        taskAdapter = TaskCenterAdapter()
+        taskAdapter = TaskCenterAdapter(thumbnails) { uri -> media.firstOrNull { it.uri == uri } }
         albumAdapter = AlbumAdapter(
             thumbnails,
             onOpen = { record -> if (record.kind == MediaKind.IMAGE) showImageViewer(record) else startFeedFrom(record) },
             onSelectionChanged = ::onAlbumSelectionChanged
         )
-        comicAdapter = ComicReaderAdapter(thumbnails)
+        comicAdapter = ComicReaderAdapter(thumbnails) { toggleImageChrome() }
 
         gridSpan = prefs.getInt("album_grid_span", 3).coerceIn(3, 6)
         longVideoMs = prefs.getLong("long_video_ms", 10L * 60 * 1000).coerceAtLeast(60_000L)
@@ -164,10 +175,17 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             unseen = prefs.getBoolean("random_unseen", false)
         )
         actionRailBottomDp = prefs.getInt("action_rail_bottom_dp", 170).coerceIn(90, 360)
+        actionOpacityPercent = prefs.getInt("action_opacity_percent", 82).coerceIn(30, 100)
+        CardTier.configure(intArrayOf(
+            prefs.getInt("tier_bronze", 1), prefs.getInt("tier_silver", 3), prefs.getInt("tier_gold", 6),
+            prefs.getInt("tier_prism", 12), prefs.getInt("tier_archive", 25)
+        ))
+        albumState = albumState.copy(collectionThreshold = CardTier.thresholds()[2])
         albumState = albumState.copy(randomSeed = prefs.getLong("album_random_seed", System.nanoTime()))
         session.setRandomPreferences(randomPreferences)
         feedAdapter.setGlobalFillMode(globalFillMode)
         feedAdapter.setActionRailBottom(dp(actionRailBottomDp))
+        feedAdapter.setActionOpacity(actionOpacityPercent / 100f)
         playback.setSingleLoop(!autoAdvance)
 
         b.feedPager.adapter = feedAdapter
@@ -190,6 +208,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         b.comicReader.adapter = comicAdapter
         b.comicReader.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+                    b.imageViewerChrome.removeCallbacks(imageChromeHide)
+                    b.imageViewerChrome.visibility = View.GONE
+                }
                 if (newState != RecyclerView.SCROLL_STATE_IDLE) return
                 val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
                 val first = lm.findFirstVisibleItemPosition()
@@ -210,9 +232,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         setupPager()
         setupAlbumControls()
 
-        b.feedTab.setOnClickListener {
-            showFeed()
-        }
+        b.feedTab.setOnClickListener { showRandomFeed() }
         b.albumTab.setOnClickListener { showAlbum() }
         b.addFolderButton.setOnClickListener { pickFolder.launch(null) }
         b.emptyAddFolderButton.setOnClickListener { pickFolder.launch(null) }
@@ -224,9 +244,20 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         b.imageViewerDelete.setOnClickListener { confirmDeleteCurrentImage() }
         b.imageViewerOpenWith.setOnClickListener { imageViewerRecord?.let(::openExternally) }
         b.imageViewerError.setOnClickListener { imageViewerRecord?.let(::showSingleImage) }
+        b.imageViewerShuffle.setOnClickListener { reshuffleImages() }
+        b.imageViewerImage.onSingleTap = { toggleImageChrome() }
+        b.imageViewerImage.onVerticalSwipe = { direction -> showAdjacentImage(direction) }
         b.landscapeBackOverlay.setOnClickListener { exitLandscapeFeed() }
         b.taskCenterBack.setOnClickListener { closeTaskCenter() }
         b.taskCenterClear.setOnClickListener { taskCenter.clearFinished() }
+        b.scanStatus.addTextChangedListener(object : TextWatcher {
+            private val hide = Runnable { b.scanStatus.animate().alpha(0f).setDuration(180L).withEndAction { b.scanStatus.visibility = View.GONE; b.scanStatus.alpha = 1f }.start() }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                b.scanStatus.removeCallbacks(hide); b.scanStatus.alpha = 1f; b.scanStatus.visibility = View.VISIBLE; b.scanStatus.postDelayed(hide, 2400L)
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
 
         refreshFromDb()
         if (repository.folderUris().isNotEmpty()) scanAll()
@@ -307,12 +338,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             b.bottomNav.setPadding(0, 0, 0, bars.bottom)
             b.bottomNav.layoutParams = b.bottomNav.layoutParams.apply { height = baseNavHeight + bars.bottom }
             b.albumGrid.setPadding(0, 0, 0, baseNavHeight + bars.bottom + dp(6))
-            (b.imageViewerBack.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top; b.imageViewerBack.layoutParams = lp }
-            (b.imageViewerMode.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top + dp(6); b.imageViewerMode.layoutParams = lp }
-            (b.imageViewerDelete.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top + dp(6); b.imageViewerDelete.layoutParams = lp }
-            (b.imageViewerOpenWith.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top + dp(6); b.imageViewerOpenWith.layoutParams = lp }
+            b.imageViewerTopBar.setPadding(dp(10), bars.top, dp(10), 0)
+            b.imageViewerTopBar.layoutParams = b.imageViewerTopBar.layoutParams.apply { height = dp(64) + bars.top }
+            (b.imageViewerBottomBar.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.bottomMargin = dp(22) + bars.bottom; b.imageViewerBottomBar.layoutParams = lp }
             (b.landscapeBackOverlay.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = bars.top + dp(8); lp.leftMargin = bars.left + dp(12); b.landscapeBackOverlay.layoutParams = lp }
-            (b.imageViewerName.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.bottomMargin = dp(18) + bars.bottom; b.imageViewerName.layoutParams = lp }
             insets
         }
         ViewCompat.requestApplyInsets(b.root)
@@ -525,7 +554,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun showLibraryMenu() {
-        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放按钮位置", "长视频阈值")
+        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值")
         AlertDialog.Builder(this).setTitle("媒体库工具").setItems(labels) { _, which ->
             when (which) {
                 0 -> showTaskCenter()
@@ -536,7 +565,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 5 -> showRandomPreferences()
                 6 -> showRecentDeleted()
                 7 -> showActionRailDialog()
-                8 -> showLongVideoThresholdDialog()
+                8 -> showCardTierDialog()
+                9 -> showLongVideoThresholdDialog()
             }
         }.show()
     }
@@ -555,19 +585,30 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun showActionRailDialog() {
-        val seek = SeekBar(this).apply { max = 270; progress = actionRailBottomDp - 90; setPadding(dp(24), dp(12), dp(24), dp(12)) }
-        val dialog = AlertDialog.Builder(this).setTitle("右侧按钮高度 · ${actionRailBottomDp}dp").setMessage("按钮只能沿右侧轨道上下移动。拖动后立即预览，重置会恢复推荐位置。")
-            .setView(seek).setNeutralButton("重置", null).setNegativeButton("取消", null).setPositiveButton("保存", null).create()
-        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionRailBottomDp = progress + 90; feedAdapter.setActionRailBottom(dp(actionRailBottomDp)); dialog.setTitle("右侧按钮高度 · ${actionRailBottomDp}dp") }
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(dp(22), dp(8), dp(22), dp(4)) }
+        val heightText = android.widget.TextView(this).apply { setTextColor(0xE6FFFFFF.toInt()); text = "按钮高度 · ${actionRailBottomDp}dp" }
+        val heightSeek = SeekBar(this).apply { max = 270; progress = actionRailBottomDp - 90 }
+        val opacityText = android.widget.TextView(this).apply { setTextColor(0xE6FFFFFF.toInt()); text = "按钮透明度 · $actionOpacityPercent%"; setPadding(0, dp(12), 0, 0) }
+        val opacitySeek = SeekBar(this).apply { max = 70; progress = actionOpacityPercent - 30 }
+        box.addView(heightText); box.addView(heightSeek); box.addView(opacityText); box.addView(opacitySeek)
+        val dialog = AlertDialog.Builder(this).setTitle("播放页操作按钮").setMessage("高度只沿右侧安全轨道调整；透明度不会影响点击区域。")
+            .setView(box).setNeutralButton("重置", null).setNegativeButton("取消", null).setPositiveButton("保存", null).create()
+        heightSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionRailBottomDp = progress + 90; heightText.text = "按钮高度 · ${actionRailBottomDp}dp"; feedAdapter.setActionRailBottom(dp(actionRailBottomDp)) }
             override fun onStartTrackingTouch(bar: SeekBar?) = Unit
             override fun onStopTrackingTouch(bar: SeekBar?) = Unit
         })
-        val before = actionRailBottomDp
+        opacitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { actionOpacityPercent = progress + 30; opacityText.text = "按钮透明度 · $actionOpacityPercent%"; feedAdapter.setActionOpacity(actionOpacityPercent / 100f) }
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+        })
+        val beforeHeight = actionRailBottomDp
+        val beforeOpacity = actionOpacityPercent
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { actionRailBottomDp = 170; seek.progress = 80 }
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { actionRailBottomDp = before; feedAdapter.setActionRailBottom(dp(before)); dialog.dismiss() }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { prefs.edit().putInt("action_rail_bottom_dp", actionRailBottomDp).apply(); dialog.dismiss() }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { heightSeek.progress = 80; opacitySeek.progress = 52 }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { actionRailBottomDp = beforeHeight; actionOpacityPercent = beforeOpacity; feedAdapter.setActionRailBottom(dp(beforeHeight)); feedAdapter.setActionOpacity(beforeOpacity / 100f); dialog.dismiss() }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { prefs.edit().putInt("action_rail_bottom_dp", actionRailBottomDp).putInt("action_opacity_percent", actionOpacityPercent).apply(); dialog.dismiss() }
         }
         dialog.show()
     }
@@ -583,6 +624,35 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             updateAlbumResults()
             dialog.dismiss()
         }.show()
+    }
+
+    private fun showCardTierDialog() {
+        val names = arrayOf("铜辉", "银曜", "金耀", "幻彩", "典藏")
+        val defaults = CardTier.thresholds()
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(dp(22), dp(4), dp(22), 0) }
+        val fields = names.indices.map { index ->
+            val row = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
+            row.addView(android.widget.TextView(this).apply { text = names[index]; setTextColor(0xE6FFFFFF.toInt()); layoutParams = android.widget.LinearLayout.LayoutParams(0, dp(46), 1f); gravity = android.view.Gravity.CENTER_VERTICAL })
+            android.widget.EditText(this).apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER; setText(defaults[index].toString()); gravity = android.view.Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt()); layoutParams = android.widget.LinearLayout.LayoutParams(dp(82), dp(42))
+            }.also { row.addView(it); box.addView(row) }
+        }
+        AlertDialog.Builder(this).setTitle("卡牌进阶条件").setMessage("默认按重复点击红心的累计次数进阶。五个数字必须从小到大；特殊标记独立于等级。")
+            .setView(box).setNeutralButton("恢复默认") { _, _ -> saveCardThresholds(intArrayOf(1,3,6,12,25)) }
+            .setNegativeButton("取消", null).setPositiveButton("保存") { _, _ ->
+                val values = fields.map { it.text.toString().toIntOrNull() ?: 0 }.toIntArray()
+                if (values[0] < 1 || !(0 until values.lastIndex).all { values[it] < values[it + 1] }) Toast.makeText(this, "保存失败：五档次数必须从小到大", Toast.LENGTH_LONG).show()
+                else saveCardThresholds(values)
+            }.show()
+    }
+
+    private fun saveCardThresholds(values: IntArray) {
+        CardTier.configure(values)
+        albumState = albumState.copy(collectionThreshold = values[2])
+        prefs.edit().putInt("tier_bronze", values[0]).putInt("tier_silver", values[1]).putInt("tier_gold", values[2]).putInt("tier_prism", values[3]).putInt("tier_archive", values[4]).apply()
+        albumAdapter.notifyItemRangeChanged(0, albumAdapter.itemCount)
+        updateAlbumResults()
     }
 
     private fun showFoldersDialog() {
@@ -658,7 +728,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private fun showFolderFilterDialog() {
         data class Bucket(val root: String, val relative: String, val label: String, val count: Int)
         val folders = repository.folderInfos().associateBy { it.rootUri }
-        val buckets = media.groupBy { it.rootUri to it.parentRelativePath() }.map { (key, list) ->
+        val buckets = media.groupBy { item ->
+            val parent = item.parentRelativePath().trim('/')
+            item.rootUri to parent.substringBefore('/', parent)
+        }.map { (key, list) ->
             val rootInfo = folders[key.first]
             val rootPath = rootInfo?.let { MediaPathUtils.rootPath(it.rootUri, it.displayName) } ?: key.first
             val label = if (key.second.isBlank()) rootPath else "$rootPath/${key.second}"
@@ -753,6 +826,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             albumState = albumState.copy(sort = sort, descending = desc, grouping = grouping, randomSeed = seed)
             if (sort == AlbumSort.RANDOM) prefs.edit().putLong("album_random_seed", seed).apply()
             updateAlbumResults()
+            b.albumGrid.post { albumAdapter.clearSelection(); albumLayoutManager.scrollToPositionWithOffset(0, 0) }
         }.show()
     }
 
@@ -1110,6 +1184,18 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         b.feedPager.post { settlePage(position) }
     }
 
+    private fun showRandomFeed() {
+        if (session.isOrdered()) {
+            session.rebuild(count = 50)
+            feedAdapter.submit(session.queue)
+            playback.updateQueue(session.queue)
+            currentFeedPosition = 0
+            lastSettledMediaId = -1L
+            if (feedAdapter.itemCount > 0) b.feedPager.setCurrentItem(0, false)
+        }
+        showFeed()
+    }
+
     private fun showAlbum(anchorMediaId: Long? = null) {
         if (landscapeFeed) exitLandscapeFeed()
         setClearScreen(false)
@@ -1169,12 +1255,13 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         landscapeFeed = false
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         feedAdapter.setLandscapeFeed(false)
-        session.rebuild(first = record, count = 50)
+        val ordered = albumAdapter.allVisibleMedia().filter { it.kind == MediaKind.VIDEO }
+        session.rebuildOrdered(if (ordered.any { it.id == record.id }) ordered else listOf(record))
         feedAdapter.submit(session.queue)
         playback.updateQueue(session.queue)
-        currentFeedPosition = 0
+        currentFeedPosition = session.queue.indexOfFirst { it.id == record.id }.coerceAtLeast(0)
         lastSettledMediaId = -1L
-        b.feedPager.setCurrentItem(0, false)
+        b.feedPager.setCurrentItem(currentFeedPosition, false)
         showFeed()
     }
 
@@ -1186,6 +1273,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         showSingleImage(record)
         b.imageViewerPanel.visibility = View.VISIBLE
         b.bottomNav.visibility = View.GONE
+        showImageChromeTemporarily()
         showSystemBars()
     }
 
@@ -1205,6 +1293,45 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         b.imageViewerName.visibility = View.VISIBLE
         b.comicReader.visibility = View.GONE
         b.imageViewerMode.text = "连续阅读"
+    }
+
+    private fun showAdjacentImage(direction: Int) {
+        val current = imageViewerRecord ?: return
+        val index = imageViewerItems.indexOfFirst { it.id == current.id }
+        val next = (index + direction).coerceIn(0, imageViewerItems.lastIndex)
+        if (index >= 0 && next != index) showSingleImage(imageViewerItems[next])
+    }
+
+    private fun toggleImageChrome() {
+        val show = b.imageViewerChrome.visibility != View.VISIBLE
+        b.imageViewerChrome.animate().cancel()
+        b.imageViewerChrome.visibility = if (show) View.VISIBLE else View.GONE
+        b.imageViewerChrome.alpha = 1f
+        if (show) scheduleImageChromeHide()
+    }
+
+    private fun showImageChromeTemporarily() {
+        b.imageViewerChrome.animate().cancel()
+        b.imageViewerChrome.alpha = 1f
+        b.imageViewerChrome.visibility = View.VISIBLE
+        scheduleImageChromeHide()
+    }
+
+    private fun scheduleImageChromeHide() {
+        b.imageViewerChrome.removeCallbacks(imageChromeHide)
+        b.imageViewerChrome.postDelayed(imageChromeHide, 2400L)
+    }
+
+    private fun reshuffleImages() {
+        val current = imageViewerRecord ?: return
+        imageViewerItems = imageViewerItems.shuffled()
+        comicAdapter.submit(imageViewerItems)
+        if (b.comicReader.visibility == View.VISIBLE) {
+            val position = comicAdapter.positionOf(current.id)
+            if (position >= 0) (b.comicReader.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(position, 0)
+        }
+        Toast.makeText(this, "图片顺序已重新洗牌", Toast.LENGTH_SHORT).show()
+        showImageChromeTemporarily()
     }
 
     private fun toggleComicReader() {
@@ -1242,7 +1369,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 b.imageViewerDelete.text = "删除中"
                 repository.deletePermanently(record) { result -> runOnUiThread {
                     b.imageViewerDelete.isEnabled = true
-                    b.imageViewerDelete.text = "删除"
+                    b.imageViewerDelete.text = "⌫"
                     if (!result.ok) {
                         taskCenter.fail(taskId, "${record.name} · ${result.message}")
                         Toast.makeText(this, "删除失败：${result.message}", Toast.LENGTH_LONG).show()
@@ -1261,6 +1388,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     private fun closeImageViewer() {
         if (b.imageViewerPanel.visibility != View.VISIBLE) return
+        b.imageViewerChrome.removeCallbacks(imageChromeHide)
         var anchor = imageViewerRecord?.id
         if (b.comicReader.visibility == View.VISIBLE) {
             val lm = b.comicReader.layoutManager as? LinearLayoutManager
@@ -1373,7 +1501,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     override fun onMore(position: Int) {
         if (position !in 0 until feedAdapter.itemCount) return
         val record = feedAdapter.itemAt(position)
-        val labels = arrayOf("从头播放", "播放速度", "画面显示", if (clearScreen) "退出清屏" else "清屏观看", if (autoAdvance) "播放结束：自动下一条" else "播放结束：单条循环", "用其他应用打开", "分享", "点赞 -1", "清空点赞", "永久删除", "媒体信息")
+        val labels = arrayOf("从头播放", "播放速度", "画面显示", if (clearScreen) "退出清屏" else "清屏观看", if (autoAdvance) "播放结束：自动下一条" else "播放结束：单条循环", "用其他应用打开", "分享", "点赞 -1", "清空点赞", if (record.specialMark) "取消特殊标记" else "添加特殊标记", "永久删除", "媒体信息")
         val dialog = AlertDialog.Builder(this).setTitle("${CardTier.forCount(record.likeCount).title} · ${record.name}").setItems(labels) { _, which ->
             when (which) {
                 0 -> if (playback.isCurrent(record.id)) playback.seekTo(0L)
@@ -1385,8 +1513,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 6 -> share(record)
                 7 -> changeLikeCount(record, position, (record.likeCount - 1).coerceAtLeast(0))
                 8 -> changeLikeCount(record, position, 0)
-                9 -> confirmDelete(record, position)
-                10 -> showInfo(record)
+                9 -> changeSpecialMark(record, position)
+                10 -> confirmDelete(record, position)
+                11 -> showInfo(record)
             }
         }.show()
         val tier = CardTier.forCount(record.likeCount)
@@ -1472,6 +1601,16 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         media = media.map { if (it.id == record.id) updated else it }
         session.updateRecord(updated); albumAdapter.updateRecord(updated)
         if (albumState.special == AlbumSpecial.LIKED || albumState.special == AlbumSpecial.COLLECTION) updateAlbumResults()
+    }
+
+    private fun changeSpecialMark(record: MediaRecord, position: Int) {
+        val updated = record.copy(specialMark = !record.specialMark)
+        repository.setSpecialMark(record.id, updated.specialMark)
+        media = media.map { if (it.id == record.id) updated else it }
+        session.updateRecord(updated)
+        feedAdapter.syncQueue(session.queue)
+        albumAdapter.updateRecord(updated)
+        Toast.makeText(this, if (updated.specialMark) "已添加特殊标记" else "已取消特殊标记", Toast.LENGTH_SHORT).show()
     }
 
     private fun hide(record: MediaRecord, position: Int) {

@@ -208,8 +208,15 @@ class MediaRepository(private val context: Context) {
         diagnosticIo.execute {
             var issues = 0
             snapshot.forEachIndexed { index, record ->
+                if (record.kind == com.localfeed.app.core.MediaKind.IMAGE) {
+                    // Animated and modern still-image formats are decoded by ImageDecoder in the
+                    // reader. BitmapFactory metadata is not a reliable corruption test for them.
+                    db.clearError(record.uri)
+                    onProgress(index + 1, snapshot.size, record.name)
+                    return@forEachIndexed
+                }
                 val problem = diagnoseOne(record)
-                if (problem == null) db.clearError(record.uri, "诊断")
+                if (problem == null) db.clearError(record.uri)
                 else {
                     issues++
                     db.recordError(record.uri, record.name, problem.stage, problem.message)
@@ -278,6 +285,7 @@ class MediaRepository(private val context: Context) {
 
     fun setLiked(id: Long, value: Boolean) = indexIo.execute { db.setLiked(id, value) }
     fun setLikeCount(id: Long, value: Int) = indexIo.execute { db.setLikeCount(id, value) }
+    fun setSpecialMark(id: Long, value: Boolean) = indexIo.execute { db.setSpecialMark(id, value) }
     fun setLikedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setLikedMany(ids, value) }
     fun setFavorited(id: Long, value: Boolean) = indexIo.execute { db.setFavorited(id, value) }
     fun setFavoritedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setFavoritedMany(ids, value) }
