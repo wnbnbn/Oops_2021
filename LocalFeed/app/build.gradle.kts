@@ -10,8 +10,8 @@ android {
         applicationId = "com.localfeed.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.6.4"
+        versionCode = 12
+        versionName = "0.7.0"
     }
 
     buildFeatures {
@@ -27,6 +27,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.recyclerview:recyclerview:1.4.0")

@@ -18,11 +18,11 @@ data class CardTier(val level: Int, val title: String, val color: Int, val width
         }
         fun thresholds(): IntArray = limits.copyOf()
         fun forCount(count: Int): CardTier = when {
-            count >= limits[4] -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.5f, "典藏 $count")
-            count >= limits[3] -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2f, "幻彩 $count")
-            count >= limits[2] -> CardTier(3, "金耀", Color.rgb(242, 190, 61), 2f, "金耀 $count")
-            count >= limits[1] -> CardTier(2, "银曜", Color.rgb(159, 199, 224), 1.5f, "银曜 $count")
-            count >= limits[0] -> CardTier(1, "铜辉", Color.rgb(194, 119, 74), 1.5f, "铜辉 $count")
+            count >= limits[4] -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.5f, "典藏")
+            count >= limits[3] -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2f, "幻彩")
+            count >= limits[2] -> CardTier(3, "金耀", Color.rgb(242, 190, 61), 2f, "金耀")
+            count >= limits[1] -> CardTier(2, "银曜", Color.rgb(159, 199, 224), 1.5f, "银曜")
+            count >= limits[0] -> CardTier(1, "铜辉", Color.rgb(194, 119, 74), 1.5f, "铜辉")
             else -> CardTier(0, "普通", Color.rgb(82, 82, 86), 1f, "")
         }
 

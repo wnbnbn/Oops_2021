@@ -1,9 +1,6 @@
 name: LocalFeed v0.4 Compile
 
 on:
-  push:
-    branches:
-      - localfeed-build
   workflow_dispatch:
 
 jobs:

@@ -3,69 +3,141 @@ package com.localfeed.app.ui
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.ViewConfiguration
 import androidx.recyclerview.widget.RecyclerView
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.pow
 
-/** Pinches the complete continuous-reading canvas, so every page keeps the same zoom level. */
+/** Zooms the continuous reader as one canvas and adds bounded horizontal focus panning. */
 class ComicReaderZoomTouchListener(
     private val recycler: RecyclerView,
     private val onSingleTap: () -> Unit
 ) : RecyclerView.SimpleOnItemTouchListener() {
     private var scale = 1f
-    private var lastEventTime = -1L
-    private var lastEventAction = -1
+    private var offsetX = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var horizontalPan = false
+    private var lastDetectorEventTime = -1L
+    private var lastDetectorAction = -1
+    private val touchSlop = ViewConfiguration.get(recycler.context).scaledTouchSlop
 
     private val scaleDetector = ScaleGestureDetector(recycler.context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
                 recycler.stopScroll()
+                recycler.parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val accelerated = detector.scaleFactor.toDouble().pow(1.55).toFloat()
-                setScale((scale * accelerated).coerceIn(1f, 3.5f), detector.focusX, detector.focusY)
+                val old = scale
+                val factor = detector.scaleFactor.toDouble().pow(1.35).toFloat()
+                scale = (scale * factor).coerceIn(1f, 4f)
+                if (old > 0f) {
+                    val center = recycler.width / 2f
+                    offsetX = (offsetX + center - detector.focusX) * (scale / old) - (center - detector.focusX)
+                }
+                applyTransform()
                 return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                if (scale <= 1.015f) reset()
             }
         })
 
     private val gestureDetector = GestureDetector(recycler.context,
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
+
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 onSingleTap()
                 return true
             }
+
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (scale > 1.05f) reset() else setScale(2.2f, e.x, e.y)
+                if (scale > 1.02f) {
+                    reset()
+                } else {
+                    scale = 2.2f
+                    offsetX = (recycler.width / 2f - e.x) * (scale - 1f)
+                    applyTransform()
+                }
                 return true
             }
         })
 
     override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
-        process(e)
-        return scaleDetector.isInProgress
+        processDetectors(e)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x
+                downY = e.y
+                lastX = e.x
+                horizontalPan = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                horizontalPan = false
+                rv.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (scale > 1.02f && e.pointerCount == 1 && !scaleDetector.isInProgress) {
+                    val dx = e.x - downX
+                    val dy = e.y - downY
+                    if (!horizontalPan && abs(dx) > touchSlop && abs(dx) > abs(dy) * 1.15f) horizontalPan = true
+                    if (horizontalPan) {
+                        offsetX += e.x - lastX
+                        applyTransform()
+                    }
+                    lastX = e.x
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                horizontalPan = false
+                if (!scaleDetector.isInProgress) rv.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+        return scaleDetector.isInProgress || horizontalPan
     }
 
     override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
-        process(e)
+        processDetectors(e)
+        if (e.actionMasked == MotionEvent.ACTION_MOVE && horizontalPan && e.pointerCount == 1 && !scaleDetector.isInProgress) {
+            offsetX += e.x - lastX
+            lastX = e.x
+            applyTransform()
+        }
+        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+            horizontalPan = false
+            rv.parent?.requestDisallowInterceptTouchEvent(false)
+        }
     }
 
-    private fun process(e: MotionEvent) {
-        if (lastEventTime == e.eventTime && lastEventAction == e.action) return
-        lastEventTime = e.eventTime
-        lastEventAction = e.action
-        scaleDetector.onTouchEvent(e)
-        gestureDetector.onTouchEvent(e)
+    fun reset() {
+        scale = 1f
+        offsetX = 0f
+        applyTransform()
+        recycler.parent?.requestDisallowInterceptTouchEvent(false)
     }
 
-    fun reset() = setScale(1f, recycler.width / 2f, recycler.height / 2f)
+    private fun processDetectors(event: MotionEvent) {
+        if (lastDetectorEventTime == event.eventTime && lastDetectorAction == event.action) return
+        lastDetectorEventTime = event.eventTime
+        lastDetectorAction = event.action
+        scaleDetector.onTouchEvent(event)
+        gestureDetector.onTouchEvent(event)
+    }
 
-    private fun setScale(value: Float, focusX: Float, focusY: Float) {
-        scale = value
-        recycler.pivotX = focusX.coerceIn(0f, recycler.width.toFloat())
-        recycler.pivotY = focusY.coerceIn(0f, recycler.height.toFloat())
+    private fun applyTransform() {
+        val maxShift = max(0f, recycler.width * (scale - 1f) / 2f)
+        offsetX = offsetX.coerceIn(-maxShift, maxShift)
+        recycler.pivotX = recycler.width / 2f
+        recycler.pivotY = recycler.height / 2f
         recycler.scaleX = scale
         recycler.scaleY = scale
+        recycler.translationX = offsetX
     }
 }

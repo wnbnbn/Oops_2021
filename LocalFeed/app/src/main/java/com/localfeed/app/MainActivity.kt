@@ -17,6 +17,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -57,6 +58,7 @@ import com.localfeed.app.ui.TimeGrouping
 import com.localfeed.app.ui.TaskCenter
 import com.localfeed.app.ui.TaskCenterAdapter
 import com.localfeed.app.ui.TaskOperation
+import com.localfeed.app.update.AppUpdater
 import java.text.DateFormat
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
@@ -75,6 +77,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private lateinit var comicZoom: ComicReaderZoomTouchListener
     private lateinit var taskCenter: TaskCenter
     private lateinit var taskAdapter: TaskCenterAdapter
+    private lateinit var appUpdater: AppUpdater
 
     private var media = listOf<MediaRecord>()
     private var session = FeedSession(emptyList())
@@ -151,6 +154,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -162,6 +166,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         playback = PlaybackCoordinator(this).also { it.listener = this }
         feedAdapter = FeedAdapter(thumbnails, this)
         taskCenter = TaskCenter(this)
+        appUpdater = AppUpdater(this, taskCenter)
         taskAdapter = TaskCenterAdapter(thumbnails) { uri -> media.firstOrNull { it.uri == uri } }
         albumAdapter = AlbumAdapter(
             thumbnails,
@@ -271,6 +276,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
         refreshFromDb()
         resumePendingFileTasks()
+        appUpdater.resumePendingDownload()
         if (repository.folderUris().isNotEmpty()) scanAll()
         showAlbum()
     }
@@ -622,7 +628,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun showLibraryMenu() {
-        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值")
+        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值", "检查更新 · 当前 ${BuildConfig.VERSION_NAME}")
         AlertDialog.Builder(this).setTitle("媒体库工具").setItems(labels) { _, which ->
             when (which) {
                 0 -> showTaskCenter()
@@ -635,6 +641,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 7 -> showActionRailDialog()
                 8 -> showCardTierDialog()
                 9 -> showLongVideoThresholdDialog()
+                10 -> appUpdater.check()
             }
         }.show()
     }
@@ -1415,11 +1422,17 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     private fun updateImageActions(record: MediaRecord) {
         b.imageLikeIcon.setImageResource(if (record.likeCount > 0) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
-        b.imageLikeCount.text = record.likeCount.toString()
+        b.imageLikeCount.text = compactLikeCount(record.likeCount)
         b.imageLikeCount.visibility = if (record.likeCount > 0) View.VISIBLE else View.GONE
         b.imageFavoriteIcon.setImageResource(if (record.favorited) R.drawable.ic_star_filled else R.drawable.ic_star_outline)
         b.imageViewerName.text = record.name
         b.imageRightActions.alpha = actionOpacityPercent / 100f
+    }
+
+    private fun compactLikeCount(count: Int): String = when {
+        count < 1000 -> count.toString()
+        count < 10_000 -> String.format(Locale.US, "%.1fk", count / 1000f).replace(".0k", "k")
+        else -> "9999+"
     }
 
     private fun replaceImageRecord(updated: MediaRecord) {
@@ -1608,6 +1621,21 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         repository.setFavorited(old.id, updated.favorited); feedAdapter.updateFavorite(position, updated)
         media = media.map { if (it.id == old.id) updated else it }; session.updateRecord(updated); albumAdapter.updateRecord(updated)
         if (albumState.special == AlbumSpecial.FAVORITE) updateAlbumResults()
+    }
+
+    override fun onToggleFitMode(position: Int) {
+        if (position !in 0 until feedAdapter.itemCount) return
+        val record = feedAdapter.itemAt(position)
+        if (record.kind != MediaKind.VIDEO) return
+        val currentlyFill = when (record.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
+        val mode = if (currentlyFill) 2 else 1
+        val updated = record.copy(fitMode = mode)
+        repository.setFitMode(record.id, mode)
+        media = media.map { if (it.id == record.id) updated else it }
+        session.updateRecord(updated)
+        feedAdapter.updateFitMode(position, updated)
+        albumAdapter.updateRecord(updated)
+        if (position == currentFeedPosition) b.feedPager.post { settlePage(position) }
     }
 
     override fun onSingleTap(position: Int) {

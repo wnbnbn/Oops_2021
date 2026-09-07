@@ -30,6 +30,7 @@ class FeedAdapter(
         fun onResetLike(position: Int)
         fun onLikeFromGesture(position: Int)
         fun onToggleFavorite(position: Int)
+        fun onToggleFitMode(position: Int)
         fun onMore(position: Int)
         fun onFullscreen(position: Int)
         fun onSingleTap(position: Int)
@@ -47,6 +48,7 @@ class FeedAdapter(
     companion object {
         private const val PAYLOAD_LIKE = "like"
         private const val PAYLOAD_FAVORITE = "favorite"
+        private const val PAYLOAD_FIT = "fit"
     }
 
     private val items = mutableListOf<MediaRecord>()
@@ -141,6 +143,12 @@ class FeedAdapter(
         notifyItemChanged(position, PAYLOAD_FAVORITE)
     }
 
+    fun updateFitMode(position: Int, record: MediaRecord) {
+        if (position !in items.indices) return
+        items[position] = record
+        notifyItemChanged(position, PAYLOAD_FIT)
+    }
+
     fun removeAt(position: Int) {
         if (position !in items.indices) return
         bound.remove(items[position].id)
@@ -201,6 +209,10 @@ class FeedAdapter(
             when (payload) {
                 PAYLOAD_LIKE -> holder.updateLike(item)
                 PAYLOAD_FAVORITE -> holder.updateFavorite(item)
+                PAYLOAD_FIT -> {
+                    holder.updateFitMode(item)
+                    holder.applyMediaLayout(item)
+                }
             }
         }
     }
@@ -269,6 +281,7 @@ class FeedAdapter(
             binding.likeButton.setOnClickListener { safePosition()?.let(callbacks::onToggleLike) }
             binding.likeButton.setOnLongClickListener { safePosition()?.let(callbacks::onResetLike); true }
             binding.favoriteButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFavorite) }
+            binding.fitModeButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFitMode) }
             binding.moreButton.setOnClickListener { safePosition()?.let(callbacks::onMore) }
             binding.fullscreenButton.setOnClickListener { safePosition()?.let(callbacks::onFullscreen) }
             binding.speedBadge.setOnClickListener {
@@ -394,24 +407,42 @@ class FeedAdapter(
         fun updateStateOnly(item: MediaRecord) {
             updateLike(item)
             updateFavorite(item)
+            updateFitMode(item)
         }
 
         fun updateLike(item: MediaRecord) {
             binding.likeIcon.setImageResource(if (item.liked) com.localfeed.app.R.drawable.ic_heart_filled else com.localfeed.app.R.drawable.ic_heart_outline)
-            binding.likeCount.text = item.likeCount.toString()
+            binding.likeCount.text = compactCount(item.likeCount)
             binding.likeCount.visibility = if (item.likeCount > 0) View.VISIBLE else View.GONE
+        }
+
+        private fun compactCount(count: Int): String = when {
+            count < 1000 -> count.toString()
+            count < 10_000 -> String.format(java.util.Locale.US, "%.1fk", count / 1000f).replace(".0k", "k")
+            else -> "9999+"
         }
 
         fun updateFavorite(item: MediaRecord) {
             binding.favoriteIcon.setImageResource(if (item.favorited) com.localfeed.app.R.drawable.ic_star_filled else com.localfeed.app.R.drawable.ic_star_outline)
         }
 
+        fun updateFitMode(item: MediaRecord) {
+            val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
+            binding.fitModeIcon.setImageResource(
+                if (fill) com.localfeed.app.R.drawable.ic_fit_fill else com.localfeed.app.R.drawable.ic_fit_complete
+            )
+            binding.fitModeButton.contentDescription = if (fill) "当前铺满，点击完整显示" else "当前完整显示，点击铺满"
+            binding.fitModeButton.visibility = if (item.kind == MediaKind.VIDEO) View.VISIBLE else View.GONE
+        }
+
         fun applyMediaLayout(item: MediaRecord) {
             if (item.kind != MediaKind.VIDEO) return
+            updateFitMode(item)
             val landscape = item.isLandscape()
+            val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
             binding.fullscreenButton.visibility = if (!landscapeFeed && landscape) View.VISIBLE else View.GONE
 
-            if (!landscapeFeed && landscape && item.aspectRatio() > 0f) {
+            if (!landscapeFeed && landscape && !fill && item.aspectRatio() > 0f) {
                 binding.playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 binding.imageView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 val screenW = binding.root.resources.displayMetrics.widthPixels
@@ -424,15 +455,14 @@ class FeedAdapter(
             } else {
                 // Landscape fullscreen is still the same mixed video feed. Portrait clips are fitted
                 // with side bars rather than being removed from the queue.
-                val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
-                binding.playerView.resizeMode = if (landscapeFeed || landscape || !fill) {
+                binding.playerView.resizeMode = if (!fill) {
                     AspectRatioFrameLayout.RESIZE_MODE_FIT
                 } else {
                     AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 }
                 binding.playerView.layoutParams = fullFrameParams()
                 binding.imageView.layoutParams = fullFrameParams()
-                binding.imageView.scaleType = if (landscapeFeed || landscape || !fill) android.widget.ImageView.ScaleType.FIT_CENTER else android.widget.ImageView.ScaleType.CENTER_CROP
+                binding.imageView.scaleType = if (!fill) android.widget.ImageView.ScaleType.FIT_CENTER else android.widget.ImageView.ScaleType.CENTER_CROP
                 binding.fullscreenButton.translationY = 0f
             }
         }

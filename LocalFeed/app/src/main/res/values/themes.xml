@@ -11,6 +11,11 @@
         <item name="android:colorAccent">#FF725E</item>
         <item name="android:alertDialogTheme">@style/Theme.LocalFeed.Dialog</item>
     </style>
+    <style name="Theme.LocalFeed.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#000000</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="postSplashScreenTheme">@style/Theme.LocalFeed</item>
+    </style>
     <style name="Theme.LocalFeed.Dialog" parent="Theme.AppCompat.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_panel_bg</item>
         <item name="android:colorAccent">#FF725E</item>
