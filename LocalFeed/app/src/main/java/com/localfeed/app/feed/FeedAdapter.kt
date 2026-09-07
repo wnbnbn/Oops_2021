@@ -440,19 +440,28 @@ class FeedAdapter(
         }
 
         fun updateFitMode(item: MediaRecord) {
-            val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
+            val landscape = item.isLandscape()
+            val fill = if (!landscapeFeed && landscape) false else preferredFill(item)
             binding.fitModeIcon.setImageResource(
                 if (fill) com.localfeed.app.R.drawable.ic_fit_fill else com.localfeed.app.R.drawable.ic_fit_complete
             )
             binding.fitModeButton.contentDescription = if (fill) "当前铺满，点击完整显示" else "当前完整显示，点击铺满"
-            binding.fitModeButton.visibility = if (item.kind == MediaKind.VIDEO) View.VISIBLE else View.GONE
+            // A landscape clip shown inside the portrait feed is always fitted. Its fullscreen
+            // button is the meaningful way to change presentation, so hide a no-op fit toggle.
+            binding.fitModeButton.visibility = if (item.kind == MediaKind.VIDEO && (landscapeFeed || !landscape)) View.VISIBLE else View.GONE
+        }
+
+        private fun preferredFill(item: MediaRecord): Boolean = when (item.fitMode) {
+            1 -> true
+            2 -> false
+            else -> globalFillMode
         }
 
         fun applyMediaLayout(item: MediaRecord) {
             if (item.kind != MediaKind.VIDEO) return
             updateFitMode(item)
             val landscape = item.isLandscape()
-            val fill = when (item.fitMode) { 1 -> true; 2 -> false; else -> globalFillMode }
+            val fill = if (!landscapeFeed && landscape) false else preferredFill(item)
             binding.fullscreenButton.visibility = if (!landscapeFeed && landscape) View.VISIBLE else View.GONE
 
             if (!landscapeFeed && landscape && !fill && item.aspectRatio() > 0f) {

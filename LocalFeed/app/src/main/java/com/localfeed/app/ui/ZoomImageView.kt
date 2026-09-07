@@ -34,17 +34,23 @@ class ZoomImageView @JvmOverloads constructor(
     private var lastY = 0f
     private var downX = 0f
     private var downY = 0f
+    private var pinchStartZoom = 1f
+    private var pinchStartSpan = 1f
+    private var hadMultiplePointers = false
 
     private val scaleDetector = ScaleGestureDetector(context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
                 parent?.requestDisallowInterceptTouchEvent(true)
+                pinchStartZoom = zoom
+                pinchStartSpan = detector.currentSpan.coerceAtLeast(1f)
                 return true
             }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val factor = detector.scaleFactor.toDouble().pow(1.7).toFloat()
-                setZoomAround((zoom * factor).coerceIn(1f, 6f), detector.focusX, detector.focusY)
+                val ratio = (detector.currentSpan / pinchStartSpan).coerceAtLeast(0.05f)
+                val target = pinchStartZoom * ratio.toDouble().pow(1.35).toFloat()
+                setZoomAround(target.coerceIn(1f, 6f), detector.focusX, detector.focusY)
                 return true
             }
 
@@ -100,9 +106,13 @@ class ZoomImageView @JvmOverloads constructor(
                 downY = event.y
                 lastX = event.x
                 lastY = event.y
+                hadMultiplePointers = false
                 if (isZoomed()) parent?.requestDisallowInterceptTouchEvent(true)
             }
-            MotionEvent.ACTION_POINTER_DOWN -> parent?.requestDisallowInterceptTouchEvent(true)
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                hadMultiplePointers = true
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (isZoomed() && event.pointerCount == 1 && !scaleDetector.isInProgress) {
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -122,10 +132,11 @@ class ZoomImageView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (event.actionMasked == MotionEvent.ACTION_UP && !isZoomed()) {
+                if (event.actionMasked == MotionEvent.ACTION_UP && !isZoomed() && !hadMultiplePointers) {
                     val dx = event.x - downX
                     val dy = event.y - downY
-                    if (abs(dy) > height * 0.12f && abs(dy) > abs(dx) * 1.35f) {
+                    val minimum = max(height * 0.065f, 42f * resources.displayMetrics.density)
+                    if (abs(dy) > minimum && abs(dy) > abs(dx) * 1.1f) {
                         onVerticalSwipe?.invoke(if (dy < 0f) 1 else -1)
                     }
                 }

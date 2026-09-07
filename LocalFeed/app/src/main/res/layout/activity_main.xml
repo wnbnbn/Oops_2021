@@ -42,18 +42,32 @@
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
                 android:gravity="center_vertical"
-                android:paddingStart="12dp"
+                android:paddingStart="16dp"
                 android:paddingEnd="6dp">
 
                 <TextView
                     android:id="@+id/albumTitle"
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:text="相册"
                     android:textColor="@android:color/white"
                     android:textSize="19sp"
                     android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/albumCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:alpha="0"
+                    android:textColor="#AFFFFFFF"
+                    android:textSize="13sp"
+                    android:visibility="invisible" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
 
                 <TextView
                     android:id="@+id/folderButton"

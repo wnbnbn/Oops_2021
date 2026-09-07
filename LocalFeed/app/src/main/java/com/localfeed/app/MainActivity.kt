@@ -111,6 +111,14 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private val albumQueryIo = Executors.newSingleThreadExecutor { r -> Thread(r, "album-query") }
     private val albumRefreshGeneration = AtomicInteger(0)
     private val playRequestGeneration = AtomicInteger(0)
+    private var lastAlbumCount: Pair<Int, Int>? = null
+    private val hideAlbumCount = Runnable {
+        if (!::b.isInitialized) return@Runnable
+        b.albumCount.animate().cancel()
+        b.albumCount.animate().alpha(0f).setDuration(180L).withEndAction {
+            b.albumCount.visibility = View.INVISIBLE
+        }.start()
+    }
     private val pendingFileCallbacks = mutableMapOf<String, (List<MediaRecord>, List<Pair<MediaRecord, String>>) -> Unit>()
     private val imageChromeHide = Runnable {
         if (::b.isInitialized && b.imageViewerPanel.visibility == View.VISIBLE) {
@@ -410,7 +418,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 albumAdapter.submit(filtered, state.grouping) {
                     if (generation != albumRefreshGeneration.get()) return@submit
                     updateAlbumCellSize()
-                    b.albumTitle.text = if (filtered.size == source.size) "相册 · ${source.size}" else "相册 · ${filtered.size}/${source.size}"
+                    showAlbumCountBriefly(filtered.size, source.size)
                     if (source.isNotEmpty() && filtered.isEmpty()) {
                         b.scanStatus.visibility = View.VISIBLE
                         b.scanStatus.text = "当前筛选没有结果"
@@ -419,6 +427,20 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 }
             }
         }
+    }
+
+    private fun showAlbumCountBriefly(visible: Int, total: Int) {
+        if (b.albumPanel.visibility != View.VISIBLE || b.feedPager.visibility == View.VISIBLE ||
+            b.taskCenterPanel.visibility == View.VISIBLE || b.imageViewerPanel.visibility == View.VISIBLE) return
+        val value = visible to total
+        if (lastAlbumCount == value) return
+        lastAlbumCount = value
+        b.albumCount.removeCallbacks(hideAlbumCount)
+        b.albumCount.animate().cancel()
+        b.albumCount.text = if (visible == total) total.toString() else "$visible / $total"
+        b.albumCount.visibility = View.VISIBLE
+        b.albumCount.alpha = 1f
+        b.albumCount.postDelayed(hideAlbumCount, 1_700L)
     }
 
     private fun updateFilterChips() {
@@ -664,7 +686,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun showLibraryMenu() {
-        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值", "检查更新 · 当前 ${BuildConfig.VERSION_NAME}")
+        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值", "媒体统计", "检查更新 · 当前 ${BuildConfig.VERSION_NAME}")
         AlertDialog.Builder(this).setTitle("媒体库工具").setItems(labels) { _, which ->
             when (which) {
                 0 -> showTaskCenter()
@@ -677,9 +699,20 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 7 -> showActionRailDialog()
                 8 -> showCardTierDialog()
                 9 -> showLongVideoThresholdDialog()
-                10 -> appUpdater.check()
+                10 -> showMediaStatistics()
+                11 -> appUpdater.check()
             }
         }.show()
+    }
+
+    private fun showMediaStatistics() {
+        val videos = media.count { it.kind == MediaKind.VIDEO }
+        val images = media.size - videos
+        AlertDialog.Builder(this)
+            .setTitle("媒体统计")
+            .setMessage("全部 ${media.size} 项\n视频 $videos\n图片 $images\n占用 ${formatBytes(media.sumOf { it.size })}")
+            .setPositiveButton("知道了", null)
+            .show()
     }
 
     private fun showTaskCenter() {

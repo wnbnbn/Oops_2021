@@ -20,6 +20,8 @@ class ComicReaderZoomTouchListener(
     private var downY = 0f
     private var lastX = 0f
     private var horizontalPan = false
+    private var pinchStartScale = 1f
+    private var pinchStartSpan = 1f
     private val touchSlop = ViewConfiguration.get(recycler.context).scaledTouchSlop
 
     private val scaleDetector = ScaleGestureDetector(recycler.context,
@@ -27,13 +29,15 @@ class ComicReaderZoomTouchListener(
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
                 recycler.stopScroll()
                 recycler.parent?.requestDisallowInterceptTouchEvent(true)
+                pinchStartScale = scale
+                pinchStartSpan = detector.currentSpan.coerceAtLeast(1f)
                 return true
             }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val old = scale
-                val factor = detector.scaleFactor.toDouble().pow(1.7).toFloat()
-                scale = (scale * factor).coerceIn(1f, 4f)
+                val ratio = (detector.currentSpan / pinchStartSpan).coerceAtLeast(0.05f)
+                scale = (pinchStartScale * ratio.toDouble().pow(1.35).toFloat()).coerceIn(1f, 4f)
                 if (old > 0f) {
                     val center = recycler.width / 2f
                     offsetX = (offsetX + center - detector.focusX) * (scale / old) - (center - detector.focusX)
@@ -85,9 +89,9 @@ class ComicReaderZoomTouchListener(
                 if (scale > 1.02f && e.pointerCount == 1 && !scaleDetector.isInProgress) {
                     val dx = e.x - downX
                     val dy = e.y - downY
-                    if (!horizontalPan && abs(dx) > touchSlop && abs(dx) > abs(dy) * 1.15f) horizontalPan = true
+                    if (!horizontalPan && abs(dx) > touchSlop * 0.7f && abs(dx) > abs(dy) * 0.9f) horizontalPan = true
                     if (horizontalPan) {
-                        offsetX += (e.x - lastX) * 1.25f
+                        offsetX += (e.x - lastX) * 1.8f
                         applyTransform()
                     }
                     lastX = e.x
@@ -104,7 +108,7 @@ class ComicReaderZoomTouchListener(
     override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
         processDetectors(e)
         if (e.actionMasked == MotionEvent.ACTION_MOVE && horizontalPan && e.pointerCount == 1 && !scaleDetector.isInProgress) {
-            offsetX += (e.x - lastX) * 1.25f
+            offsetX += (e.x - lastX) * 1.8f
             lastX = e.x
             applyTransform()
         }

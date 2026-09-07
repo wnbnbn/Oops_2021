@@ -188,7 +188,9 @@ class MediaRepository(private val context: Context) {
                 newNames = newNames,
                 authorizationNeeded = authorizationNeeded
             )
-            onIndexed(db.allVisible(), indexedSummary)
+            // The UI intentionally does not publish half-read rows. Avoid constructing the entire
+            // gallery here; on a large database this duplicate snapshot also pressures CursorWindow.
+            onIndexed(emptyList(), indexedSummary)
 
             metadataIo.execute {
                 try {

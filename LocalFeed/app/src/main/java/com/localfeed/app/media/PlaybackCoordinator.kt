@@ -36,7 +36,7 @@ class PlaybackCoordinator(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var currentView: PlayerView? = null
     private var currentRecordId: Long = -1L
-    private var firstFrameReadyId: Long = -1L
+    private var awaitingFirstFrameId: Long = -1L
     private var currentFeedIndex = 0
     private val mapped = HashMap<Long, MediaItem>()
     private var released = false
@@ -65,9 +65,6 @@ class PlaybackCoordinator(context: Context) {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY && player.currentMediaItem?.mediaId == currentRecordId.toString()) {
-                    firstFrameReadyId = currentRecordId
-                }
                 if (playbackState == Player.STATE_ENDED && currentRecordId >= 0) listener?.onPlaybackEnded(currentRecordId)
             }
 
@@ -78,8 +75,11 @@ class PlaybackCoordinator(context: Context) {
 
             override fun onRenderedFirstFrame() {
                 val id = currentRecordId
-                if (id >= 0 && firstFrameReadyId == id && player.currentMediaItem?.mediaId == id.toString()) {
-                    firstFrameReadyId = -1L
+                // Some codecs render their first frame before STATE_READY, while others report
+                // READY first. Waiting for that ordering left the video playing behind its poster
+                // until the user sought. The requested media id is the stable ownership check.
+                if (id >= 0 && awaitingFirstFrameId == id && player.currentMediaItem?.mediaId == id.toString()) {
+                    awaitingFirstFrameId = -1L
                     listener?.onFirstFrame(id)
                 }
             }
@@ -106,17 +106,17 @@ class PlaybackCoordinator(context: Context) {
         }
 
         val changingMedia = currentRecordId != record.id || player.currentMediaItem?.mediaId != record.id.toString()
+        val changingView = currentView !== view
         if (changingMedia) cancelTemporaryBoost()
         if (changingMedia) {
-            firstFrameReadyId = -1L
             currentView?.player = null
             currentView = null
             player.clearVideoSurface()
         }
-        attachTo(view)
-        currentFeedIndex = feedIndex
-
         currentRecordId = record.id
+        currentFeedIndex = feedIndex
+        if (changingMedia || changingView) awaitingFirstFrameId = record.id
+        attachTo(view)
         if (changingMedia) {
             val item = mapped[record.id] ?: mediaItem(record)
             player.setMediaItem(item)
@@ -125,7 +125,7 @@ class PlaybackCoordinator(context: Context) {
                 player.seekTo(resumePositionMs)
             }
             applyEffectiveSpeed()
-        } else if (player.playbackState == Player.STATE_READY) {
+        } else if (!changingView && player.playbackState == Player.STATE_READY) {
             listener?.onFirstFrame(record.id)
         }
         player.play()

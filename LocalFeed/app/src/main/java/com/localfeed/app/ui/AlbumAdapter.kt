@@ -5,8 +5,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
-import androidx.recyclerview.widget.AsyncListDiffer
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
@@ -35,16 +33,7 @@ class AlbumAdapter(
         private const val PAYLOAD_STATE = "state"
     }
 
-    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<Row>() {
-        override fun areItemsTheSame(oldItem: Row, newItem: Row): Boolean = when {
-            oldItem is Row.Media && newItem is Row.Media -> oldItem.record.id == newItem.record.id
-            oldItem is Row.Header && newItem is Row.Header -> oldItem.key == newItem.key
-            else -> false
-        }
-
-        override fun areContentsTheSame(oldItem: Row, newItem: Row): Boolean = oldItem == newItem
-    })
-    private val rows: List<Row> get() = differ.currentList
+    private val rows = mutableListOf<Row>()
     private val selected = linkedSetOf<Long>()
     private val dayFormat = SimpleDateFormat("yyyy年M月d日", Locale.CHINA)
     private var cellSizePx: Int = 0
@@ -63,13 +52,19 @@ class AlbumAdapter(
         val newRows = buildRows(list, grouping)
         val existingIds = list.asSequence().map { it.id }.toSet()
         if (selected.retainAll(existingIds)) onSelectionChanged(selected.toSet())
-        differ.submitList(newRows) { onCommitted?.invoke() }
+        // Category/filter changes commonly replace most of a multi-thousand item gallery. Running
+        // move detection for that case is slower than rebinding the handful of visible cells.
+        rows.clear()
+        rows.addAll(newRows)
+        notifyDataSetChanged()
+        onCommitted?.invoke()
     }
 
     fun updateRecord(record: MediaRecord) {
         val pos = rows.indexOfFirst { it is Row.Media && it.record.id == record.id }
         if (pos < 0) return
-        differ.submitList(rows.toMutableList().also { it[pos] = Row.Media(record) })
+        rows[pos] = Row.Media(record)
+        notifyItemChanged(pos, PAYLOAD_STATE)
     }
 
     fun highlightMedia(id: Long?) {

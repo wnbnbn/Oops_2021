@@ -50,6 +50,16 @@ data class UpsertOutcome(
 )
 
 class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db", null, 10) {
+    companion object {
+        // Never use SELECT * for gallery rows. visual_hashes and full_hash can make individual
+        // rows large enough to exhaust Android's CursorWindow in a multi-thousand-file library.
+        private val RECORD_COLUMNS = listOf(
+            "id", "uri", "root_uri", "relative_path", "name", "mime", "kind", "size",
+            "modified_at", "duration_ms", "width", "height", "rotation", "liked", "like_count",
+            "special_mark", "favorited", "last_shown_at", "show_count", "playback_position_ms",
+            "fit_mode", "hidden", "added_at", "trashed_at"
+        ).joinToString(",")
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -347,15 +357,15 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
     }
 
     fun allVisible(): List<MediaRecord> = readableDatabase.rawQuery(
-        "SELECT * FROM media WHERE hidden=0 AND trashed_at=0 ORDER BY added_at DESC, id DESC", null
+        "SELECT $RECORD_COLUMNS FROM media WHERE hidden=0 AND trashed_at=0 ORDER BY added_at DESC, id DESC", null
     ).use(::readAll)
 
     fun allTrashed(): List<MediaRecord> = readableDatabase.rawQuery(
-        "SELECT * FROM media WHERE trashed_at>0 ORDER BY trashed_at DESC", null
+        "SELECT $RECORD_COLUMNS FROM media WHERE trashed_at>0 ORDER BY trashed_at DESC", null
     ).use(::readAll)
 
     fun recordById(id: Long): MediaRecord? = readableDatabase.rawQuery(
-        "SELECT * FROM media WHERE id=?", arrayOf(id.toString())
+        "SELECT $RECORD_COLUMNS FROM media WHERE id=?", arrayOf(id.toString())
     ).use { c -> readAll(c).firstOrNull() }
 
     fun setLiked(id: Long, liked: Boolean) {
@@ -544,7 +554,7 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
     }
 
     fun recordByUri(uri: String): MediaRecord? = readableDatabase.rawQuery(
-        "SELECT * FROM media WHERE uri=?", arrayOf(uri)
+        "SELECT $RECORD_COLUMNS FROM media WHERE uri=?", arrayOf(uri)
     ).use { c -> readAll(c).firstOrNull() }
 
     fun problems(): List<ProblemMedia> = readableDatabase.rawQuery(
