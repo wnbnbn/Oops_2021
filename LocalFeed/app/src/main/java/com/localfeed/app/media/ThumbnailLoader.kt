@@ -26,7 +26,9 @@ import kotlin.math.max
  * after holders are recycled or the app is reopened.
  */
 class ThumbnailLoader(private val context: Context) {
-    private val executor = Executors.newFixedThreadPool(2) { r -> Thread(r, "thumb-worker") }
+    // Foreground posters must never sit behind thousands of album thumbnails.
+    private val foregroundExecutor = Executors.newFixedThreadPool(2) { r -> Thread(r, "thumb-visible") }
+    private val backgroundExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "thumb-album") }
     private val cacheDir = File(context.cacheDir, "thumbs_v2").apply { mkdirs() }
     private val jobs = Collections.synchronizedMap(WeakHashMap<ImageView, Future<*>>())
     private val memory = object : LruCache<String, Bitmap>(48 * 1024 * 1024) {
@@ -34,7 +36,7 @@ class ThumbnailLoader(private val context: Context) {
     }
 
     init {
-        executor.execute { pruneDiskCache() }
+        backgroundExecutor.execute { pruneDiskCache() }
     }
 
     fun load(record: MediaRecord, view: ImageView, targetPx: Int = 720, onResult: ((Boolean) -> Unit)? = null) {
@@ -53,6 +55,7 @@ class ThumbnailLoader(private val context: Context) {
 
         view.tag = key
         view.setImageDrawable(null)
+        val executor = if (targetPx >= 1000) foregroundExecutor else backgroundExecutor
         val future = executor.submit {
             if (Thread.currentThread().isInterrupted) return@submit
             val disk = diskFile(key)
@@ -81,12 +84,12 @@ class ThumbnailLoader(private val context: Context) {
     private fun loadFullImageDrawable(record: MediaRecord, view: ImageView, targetPx: Int, key: String, onResult: ((Boolean) -> Unit)?) {
         view.tag = key
         view.setImageDrawable(null)
-        val future = executor.submit {
+        val future = foregroundExecutor.submit {
             val drawable = runCatching {
                 val source = ImageDecoder.createSource(context.contentResolver, Uri.parse(record.uri))
                 ImageDecoder.decodeDrawable(source) { decoder, info, _ ->
                     val largest = max(info.size.width, info.size.height).coerceAtLeast(1)
-                    if (largest > targetPx * 2) decoder.setTargetSampleSize((largest / (targetPx * 2)).coerceAtLeast(1))
+                    if (largest > targetPx) decoder.setTargetSampleSize((largest / targetPx).coerceAtLeast(1))
                 }
             }.getOrNull()
             view.post {
@@ -104,7 +107,25 @@ class ThumbnailLoader(private val context: Context) {
     fun release() {
         jobs.values.forEach { it.cancel(false) }
         jobs.clear()
-        executor.shutdownNow()
+        foregroundExecutor.shutdownNow()
+        backgroundExecutor.shutdownNow()
+        memory.evictAll()
+    }
+
+    fun clear(view: ImageView) {
+        jobs.remove(view)?.cancel(true)
+        (view.drawable as? AnimatedImageDrawable)?.stop()
+        view.tag = null
+        view.setImageDrawable(null)
+    }
+
+    fun trimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            memory.trimToSize(12 * 1024 * 1024)
+        }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            memory.evictAll()
+        }
     }
 
     private fun decodeImage(uri: Uri, target: Int): Bitmap? {

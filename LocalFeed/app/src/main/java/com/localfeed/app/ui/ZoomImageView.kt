@@ -43,13 +43,13 @@ class ZoomImageView @JvmOverloads constructor(
             }
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val factor = detector.scaleFactor.toDouble().pow(1.35).toFloat()
+                val factor = detector.scaleFactor.toDouble().pow(1.7).toFloat()
                 setZoomAround((zoom * factor).coerceIn(1f, 6f), detector.focusX, detector.focusY)
                 return true
             }
 
             override fun onScaleEnd(detector: ScaleGestureDetector) {
-                if (zoom <= 1.015f) resetZoom()
+                if (zoom <= 1.001f) resetZoom()
             }
         })
 

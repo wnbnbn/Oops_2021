@@ -25,7 +25,8 @@ data class ScanSummary(
     val metadataErrors: Int = 0,
     val newFileErrors: Int = 0,
     val newNames: List<String> = emptyList(),
-    val authorizationNeeded: Int = 0
+    val authorizationNeeded: Int = 0,
+    val pendingUris: Set<String> = emptySet()
 )
 
 data class DiagnosticSummary(val checked: Int, val issues: Int)
@@ -133,10 +134,12 @@ class MediaRepository(private val context: Context) {
     fun scanAll(
         onProgress: (String) -> Unit,
         onIndexed: (List<MediaRecord>, ScanSummary) -> Unit,
-        onMetadataDone: (List<MediaRecord>, ScanSummary) -> Unit
+        onMetadataDone: (List<MediaRecord>, ScanSummary) -> Unit,
+        onFailed: (String) -> Unit = {}
     ) {
         val run = generation.incrementAndGet()
         indexIo.execute {
+          try {
             val configuredRoots = db.folderUris()
             val grantedRoots = context.contentResolver.persistedUriPermissions
                 .asSequence()
@@ -188,15 +191,29 @@ class MediaRepository(private val context: Context) {
             onIndexed(db.allVisible(), indexedSummary)
 
             metadataIo.execute {
-                if (run != generation.get()) return@execute
-                val scanner = TreeScanner(context, db)
-                val meta = storageLock.withLock {
-                    scanner.enrichMetadata(allTasks) { done, total ->
-                        if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
+                try {
+                    if (run != generation.get()) return@execute
+                    val scanner = TreeScanner(context, db)
+                    val meta = storageLock.withLock {
+                        scanner.enrichMetadata(allTasks) { done, total ->
+                            if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
+                        }
                     }
+                    if (run == generation.get()) onMetadataDone(
+                        db.allVisible(),
+                        indexedSummary.copy(
+                            metadataErrors = meta.errors,
+                            newFileErrors = meta.newFileErrors,
+                            pendingUris = meta.failedNewUris
+                        )
+                    )
+                } catch (error: Throwable) {
+                    if (run == generation.get()) onFailed("媒体信息分析失败：${error.message ?: error.javaClass.simpleName}")
                 }
-                if (run == generation.get()) onMetadataDone(db.allVisible(), indexedSummary.copy(metadataErrors = meta.errors, newFileErrors = meta.newFileErrors))
             }
+          } catch (error: Throwable) {
+              if (run == generation.get()) onFailed("媒体索引失败：${error.message ?: error.javaClass.simpleName}")
+          }
         }
     }
 

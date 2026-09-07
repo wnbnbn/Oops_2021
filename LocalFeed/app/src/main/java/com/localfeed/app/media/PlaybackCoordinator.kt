@@ -36,6 +36,7 @@ class PlaybackCoordinator(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var currentView: PlayerView? = null
     private var currentRecordId: Long = -1L
+    private var firstFrameReadyId: Long = -1L
     private var currentFeedIndex = 0
     private val mapped = HashMap<Long, MediaItem>()
     private var released = false
@@ -64,6 +65,9 @@ class PlaybackCoordinator(context: Context) {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY && player.currentMediaItem?.mediaId == currentRecordId.toString()) {
+                    firstFrameReadyId = currentRecordId
+                }
                 if (playbackState == Player.STATE_ENDED && currentRecordId >= 0) listener?.onPlaybackEnded(currentRecordId)
             }
 
@@ -73,7 +77,11 @@ class PlaybackCoordinator(context: Context) {
             }
 
             override fun onRenderedFirstFrame() {
-                if (currentRecordId >= 0) listener?.onFirstFrame(currentRecordId)
+                val id = currentRecordId
+                if (id >= 0 && firstFrameReadyId == id && player.currentMediaItem?.mediaId == id.toString()) {
+                    firstFrameReadyId = -1L
+                    listener?.onFirstFrame(id)
+                }
             }
         })
         mainHandler.post(progressTick)
@@ -100,6 +108,7 @@ class PlaybackCoordinator(context: Context) {
         val changingMedia = currentRecordId != record.id || player.currentMediaItem?.mediaId != record.id.toString()
         if (changingMedia) cancelTemporaryBoost()
         if (changingMedia) {
+            firstFrameReadyId = -1L
             currentView?.player = null
             currentView = null
             player.clearVideoSurface()
@@ -116,6 +125,8 @@ class PlaybackCoordinator(context: Context) {
                 player.seekTo(resumePositionMs)
             }
             applyEffectiveSpeed()
+        } else if (player.playbackState == Player.STATE_READY) {
+            listener?.onFirstFrame(record.id)
         }
         player.play()
     }

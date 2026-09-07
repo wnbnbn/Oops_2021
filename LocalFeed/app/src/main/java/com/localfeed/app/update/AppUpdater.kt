@@ -64,12 +64,29 @@ class AppUpdater(
     }
 
     private fun fetchLatest(): UpdateInfo {
-        val connection = URL(RELEASE_API).openConnection() as HttpURLConnection
-        connection.connectTimeout = 12_000
-        connection.readTimeout = 20_000
-        connection.setRequestProperty("Accept", "application/vnd.github+json")
-        connection.setRequestProperty("User-Agent", "LocalFeed/${BuildConfig.VERSION_NAME}")
-        val text = connection.inputStream.bufferedReader().use { it.readText() }
+        var lastError: Throwable? = null
+        UPDATE_MANIFESTS.forEach { endpoint ->
+            try {
+                val text = readText(endpoint + if (endpoint.contains('?')) "&t=${System.currentTimeMillis()}" else "?t=${System.currentTimeMillis()}")
+                val root = JSONObject(text)
+                val version = normalizeVersion(root.optString("version"))
+                val apk = root.optString("apk_url")
+                if (version.isNotBlank() && apk.isNotBlank()) {
+                    val checksum = root.optString("checksum_url").takeIf { it.isNotBlank() }
+                    return UpdateInfo(version, root.optString("notes"), apk, checksum)
+                }
+            } catch (error: Throwable) {
+                lastError = error
+            }
+        }
+        return try {
+            parseRelease(readText(RELEASE_API, githubApi = true))
+        } catch (error: Throwable) {
+            throw IllegalStateException(lastError?.message ?: error.message ?: "更新服务暂时不可用", error)
+        }
+    }
+
+    private fun parseRelease(text: String): UpdateInfo {
         val release = JSONObject(text)
         val version = normalizeVersion(release.optString("tag_name").ifBlank { release.optString("name") })
         val assets = release.getJSONArray("assets")
@@ -84,6 +101,20 @@ class AppUpdater(
         }
         require(version.isNotBlank() && apk.isNotBlank()) { "发布内容中没有可安装的 APK" }
         return UpdateInfo(version, release.optString("body"), apk, checksum)
+    }
+
+    private fun readText(url: String, githubApi: Boolean = false): String {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 6_000
+        connection.readTimeout = 9_000
+        if (githubApi) connection.setRequestProperty("Accept", "application/vnd.github+json")
+        connection.setRequestProperty("User-Agent", "LocalFeed/${BuildConfig.VERSION_NAME}")
+        return try {
+            require(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun showResult(info: UpdateInfo) {
@@ -225,6 +256,10 @@ class AppUpdater(
     }
 
     companion object {
+        private val UPDATE_MANIFESTS = listOf(
+            "https://cdn.jsdelivr.net/gh/wnbnbn/Oops_2021@localfeed-build/localfeed_ci/update.json",
+            "https://raw.githubusercontent.com/wnbnbn/Oops_2021/localfeed-build/localfeed_ci/update.json"
+        )
         private const val RELEASE_API = "https://api.github.com/repos/wnbnbn/Oops_2021/releases/latest"
         private const val APK_MIME = "application/vnd.android.package-archive"
     }

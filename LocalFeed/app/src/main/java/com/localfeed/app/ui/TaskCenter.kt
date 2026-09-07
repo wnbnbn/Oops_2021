@@ -1,6 +1,8 @@
 package com.localfeed.app.ui
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -25,13 +27,16 @@ data class MediaTask(
 
 class TaskCenter(context: Context) {
     private val prefs = context.getSharedPreferences("localfeed_tasks", Context.MODE_PRIVATE)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val tasks = load().toMutableList()
+    private var lastPersistAt = 0L
+    private var lastNotifyAt = 0L
     var listener: ((List<MediaTask>) -> Unit)? = null
 
     @Synchronized fun start(title: String, detail: String = "", thumbnailUri: String = ""): String {
         val id = UUID.randomUUID().toString()
         tasks.add(0, MediaTask(id, title, detail, TaskState.RUNNING, 0, 0, thumbnailUri, System.currentTimeMillis()))
-        commit(); return id
+        commit(forcePersist = true, forceNotify = true); return id
     }
 
     /** Starts file work whose exact targets survive process death and can be resumed safely. */
@@ -48,11 +53,11 @@ class TaskCenter(context: Context) {
             id, title, detail, TaskState.QUEUED, 0, uniqueTargets.size, thumbnailUri,
             System.currentTimeMillis(), operation, uniqueTargets
         ))
-        commit()
+        commit(forcePersist = true, durable = true, forceNotify = true)
         return id
     }
 
-    @Synchronized fun markRunning(id: String, detail: String? = null) = mutate(id) {
+    @Synchronized fun markRunning(id: String, detail: String? = null) = mutate(id, forcePersist = true, forceNotify = true) {
         it.copy(
             detail = detail ?: it.detail,
             state = TaskState.RUNNING,
@@ -80,11 +85,11 @@ class TaskCenter(context: Context) {
         it.copy(detail = detail, state = TaskState.RUNNING, progress = progress, total = total, updatedAt = System.currentTimeMillis())
     }
 
-    @Synchronized fun finish(id: String, detail: String) = mutate(id) {
+    @Synchronized fun finish(id: String, detail: String) = mutate(id, forcePersist = true, durable = true, forceNotify = true) {
         it.copy(detail = detail, state = TaskState.DONE, progress = it.total, updatedAt = System.currentTimeMillis(), targetIds = emptyList(), completedIds = emptySet())
     }
 
-    @Synchronized fun fail(id: String, detail: String) = mutate(id) {
+    @Synchronized fun fail(id: String, detail: String) = mutate(id, forcePersist = true, durable = true, forceNotify = true) {
         it.copy(detail = detail, state = TaskState.FAILED, updatedAt = System.currentTimeMillis(), targetIds = emptyList(), completedIds = emptySet())
     }
 
@@ -92,27 +97,50 @@ class TaskCenter(context: Context) {
 
     @Synchronized fun clearFinished() {
         tasks.removeAll { it.state == TaskState.DONE || it.state == TaskState.FAILED }
-        commit()
+        commit(forcePersist = true, durable = true, forceNotify = true)
     }
 
-    private fun mutate(id: String, block: (MediaTask) -> MediaTask) {
+    private fun mutate(
+        id: String,
+        forcePersist: Boolean = false,
+        durable: Boolean = false,
+        forceNotify: Boolean = false,
+        block: (MediaTask) -> MediaTask
+    ) {
         val index = tasks.indexOfFirst { it.id == id }
-        if (index >= 0) { tasks[index] = block(tasks[index]); commit() }
+        if (index >= 0) {
+            tasks[index] = block(tasks[index])
+            commit(forcePersist, durable, forceNotify)
+        }
     }
 
-    private fun commit() {
+    /**
+     * Progress can arrive dozens of times per second during a large scan or delete. Serialising a
+     * target list with thousands of IDs and synchronously fsyncing SharedPreferences for every
+     * tick used to stall the UI and could trigger an ANR exactly when a scan completed.
+     */
+    private fun commit(forcePersist: Boolean, durable: Boolean = false, forceNotify: Boolean = false) {
         while (tasks.size > 80) tasks.removeLast()
-        val array = JSONArray()
-        tasks.forEach { t -> array.put(JSONObject().apply {
-            put("id", t.id); put("title", t.title); put("detail", t.detail); put("state", t.state.name)
-            put("progress", t.progress); put("total", t.total); put("thumbnailUri", t.thumbnailUri); put("updatedAt", t.updatedAt)
-            put("operation", t.operation.name)
-            put("targetIds", JSONArray(t.targetIds))
-            put("completedIds", JSONArray(t.completedIds.toList()))
-        }) }
-        // Destructive task progress must be durable before the next file starts.
-        prefs.edit().putString("history", array.toString()).commit()
-        listener?.invoke(tasks.toList())
+        val now = System.currentTimeMillis()
+        if (forcePersist || now - lastPersistAt >= 1_000L) {
+            val array = JSONArray()
+            tasks.forEach { t -> array.put(JSONObject().apply {
+                put("id", t.id); put("title", t.title); put("detail", t.detail); put("state", t.state.name)
+                put("progress", t.progress); put("total", t.total); put("thumbnailUri", t.thumbnailUri); put("updatedAt", t.updatedAt)
+                put("operation", t.operation.name)
+                put("targetIds", JSONArray(t.targetIds))
+                put("completedIds", JSONArray(t.completedIds.toList()))
+            }) }
+            val editor = prefs.edit().putString("history", array.toString())
+            if (durable) editor.commit() else editor.apply()
+            lastPersistAt = now
+        }
+        if (forceNotify || now - lastNotifyAt >= 200L) {
+            val snapshot = tasks.toList()
+            val callback = Runnable { listener?.invoke(snapshot) }
+            if (Looper.myLooper() == Looper.getMainLooper()) callback.run() else mainHandler.post(callback)
+            lastNotifyAt = now
+        }
     }
 
     private fun load(): List<MediaTask> = runCatching {

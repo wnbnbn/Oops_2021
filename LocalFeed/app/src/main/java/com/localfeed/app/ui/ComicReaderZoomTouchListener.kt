@@ -20,8 +20,6 @@ class ComicReaderZoomTouchListener(
     private var downY = 0f
     private var lastX = 0f
     private var horizontalPan = false
-    private var lastDetectorEventTime = -1L
-    private var lastDetectorAction = -1
     private val touchSlop = ViewConfiguration.get(recycler.context).scaledTouchSlop
 
     private val scaleDetector = ScaleGestureDetector(recycler.context,
@@ -34,7 +32,7 @@ class ComicReaderZoomTouchListener(
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val old = scale
-                val factor = detector.scaleFactor.toDouble().pow(1.35).toFloat()
+                val factor = detector.scaleFactor.toDouble().pow(1.7).toFloat()
                 scale = (scale * factor).coerceIn(1f, 4f)
                 if (old > 0f) {
                     val center = recycler.width / 2f
@@ -45,7 +43,7 @@ class ComicReaderZoomTouchListener(
             }
 
             override fun onScaleEnd(detector: ScaleGestureDetector) {
-                if (scale <= 1.015f) reset()
+                if (scale <= 1.001f) reset()
             }
         })
 
@@ -89,7 +87,7 @@ class ComicReaderZoomTouchListener(
                     val dy = e.y - downY
                     if (!horizontalPan && abs(dx) > touchSlop && abs(dx) > abs(dy) * 1.15f) horizontalPan = true
                     if (horizontalPan) {
-                        offsetX += e.x - lastX
+                        offsetX += (e.x - lastX) * 1.25f
                         applyTransform()
                     }
                     lastX = e.x
@@ -106,7 +104,7 @@ class ComicReaderZoomTouchListener(
     override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
         processDetectors(e)
         if (e.actionMasked == MotionEvent.ACTION_MOVE && horizontalPan && e.pointerCount == 1 && !scaleDetector.isInProgress) {
-            offsetX += e.x - lastX
+            offsetX += (e.x - lastX) * 1.25f
             lastX = e.x
             applyTransform()
         }
@@ -124,9 +122,6 @@ class ComicReaderZoomTouchListener(
     }
 
     private fun processDetectors(event: MotionEvent) {
-        if (lastDetectorEventTime == event.eventTime && lastDetectorAction == event.action) return
-        lastDetectorEventTime = event.eventTime
-        lastDetectorAction = event.action
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
     }

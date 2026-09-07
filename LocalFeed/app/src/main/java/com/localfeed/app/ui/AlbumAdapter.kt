@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
+import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
@@ -34,7 +35,16 @@ class AlbumAdapter(
         private const val PAYLOAD_STATE = "state"
     }
 
-    private var rows: List<Row> = emptyList()
+    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<Row>() {
+        override fun areItemsTheSame(oldItem: Row, newItem: Row): Boolean = when {
+            oldItem is Row.Media && newItem is Row.Media -> oldItem.record.id == newItem.record.id
+            oldItem is Row.Header && newItem is Row.Header -> oldItem.key == newItem.key
+            else -> false
+        }
+
+        override fun areContentsTheSame(oldItem: Row, newItem: Row): Boolean = oldItem == newItem
+    })
+    private val rows: List<Row> get() = differ.currentList
     private val selected = linkedSetOf<Long>()
     private val dayFormat = SimpleDateFormat("yyyy年M月d日", Locale.CHINA)
     private var cellSizePx: Int = 0
@@ -49,34 +59,17 @@ class AlbumAdapter(
         notifyItemRangeChanged(0, itemCount)
     }
 
-    fun submit(list: List<MediaRecord>, grouping: TimeGrouping) {
+    fun submit(list: List<MediaRecord>, grouping: TimeGrouping, onCommitted: (() -> Unit)? = null) {
         val newRows = buildRows(list, grouping)
-        val old = rows
-        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize(): Int = old.size
-            override fun getNewListSize(): Int = newRows.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                val a = old[oldItemPosition]
-                val b = newRows[newItemPosition]
-                return when {
-                    a is Row.Media && b is Row.Media -> a.record.id == b.record.id
-                    a is Row.Header && b is Row.Header -> a.key == b.key
-                    else -> false
-                }
-            }
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean = old[oldItemPosition] == newRows[newItemPosition]
-        })
-        rows = newRows
         val existingIds = list.asSequence().map { it.id }.toSet()
         if (selected.retainAll(existingIds)) onSelectionChanged(selected.toSet())
-        diff.dispatchUpdatesTo(this)
+        differ.submitList(newRows) { onCommitted?.invoke() }
     }
 
     fun updateRecord(record: MediaRecord) {
         val pos = rows.indexOfFirst { it is Row.Media && it.record.id == record.id }
         if (pos < 0) return
-        rows = rows.toMutableList().also { it[pos] = Row.Media(record) }
-        notifyItemChanged(pos, PAYLOAD_STATE)
+        differ.submitList(rows.toMutableList().also { it[pos] = Row.Media(record) })
     }
 
     fun highlightMedia(id: Long?) {
@@ -264,6 +257,7 @@ class AlbumAdapter(
             specialAnimator?.cancel()
             specialAnimator = null
             b.specialBadge.rotation = 0f
+            loader.clear(b.thumb)
         }
 
         fun bindSelection(value: Boolean) {

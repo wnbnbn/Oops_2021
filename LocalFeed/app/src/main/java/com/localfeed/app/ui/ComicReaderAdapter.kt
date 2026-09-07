@@ -74,11 +74,16 @@ class ComicReaderAdapter(
         }
         holder.error.visibility = View.GONE
         holder.image.visibility = View.VISIBLE
-        loader.load(record, holder.image, 1800) { ok ->
+        loader.load(record, holder.image, 1200) { ok ->
             holder.error.text = if (ok) "" else "${record.name}\n读取失败"
             holder.error.visibility = if (ok) View.GONE else View.VISIBLE
             holder.image.visibility = if (ok) View.VISIBLE else View.INVISIBLE
         }
+    }
+
+    override fun onViewRecycled(holder: Holder) {
+        loader.clear(holder.image)
+        super.onViewRecycled(holder)
     }
 
     class Holder(root: View, val image: AppCompatImageView, val error: TextView) : RecyclerView.ViewHolder(root)

@@ -61,6 +61,7 @@ import com.localfeed.app.ui.TaskOperation
 import com.localfeed.app.update.AppUpdater
 import java.text.DateFormat
 import java.util.Locale
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
@@ -107,6 +108,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private var actionRailBottomDp = 170
     private var actionOpacityPercent = 82
     private var activeFileTaskId: String? = null
+    private val albumQueryIo = Executors.newSingleThreadExecutor { r -> Thread(r, "album-query") }
+    private val albumRefreshGeneration = AtomicInteger(0)
+    private val playRequestGeneration = AtomicInteger(0)
     private val pendingFileCallbacks = mutableMapOf<String, (List<MediaRecord>, List<Pair<MediaRecord, String>>) -> Unit>()
     private val imageChromeHide = Runnable {
         if (::b.isInitialized && b.imageViewerPanel.visibility == View.VISIBLE) {
@@ -315,14 +319,19 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                     feedAdapter.append(session.queue.subList(oldSize, session.queue.size))
                     playback.updateQueue(session.queue)
                 }
-                // Attach as soon as ViewPager selects the page. Waiting for IDLE leaves the whole
-                // swipe showing an empty target and was a major source of visible page flashes.
-                settlePage(position)
+                // During a fling, only the final settled page is allowed to own the player. Each
+                // page already displays its own poster, so keeping the old decoder attached here
+                // would leak the previous frame into the next TextureView.
+                if (pagerScrollState == ViewPager2.SCROLL_STATE_IDLE) settlePage(position)
             }
 
             override fun onPageScrollStateChanged(state: Int) {
                 pagerScrollState = state
-                if (state != ViewPager2.SCROLL_STATE_IDLE) playback.cancelTemporaryBoost()
+                if (state != ViewPager2.SCROLL_STATE_IDLE) {
+                    playRequestGeneration.incrementAndGet()
+                    playback.cancelTemporaryBoost()
+                    playback.pauseOnly()
+                }
                 if (state == ViewPager2.SCROLL_STATE_IDLE) settlePage(currentFeedPosition)
             }
         })
@@ -384,15 +393,31 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private fun pendingFileTargetIds(): Set<Long> = taskCenter.resumable()
         .flatMapTo(hashSetOf()) { it.targetIds }
 
-    private fun updateAlbumResults() {
-        val filtered = AlbumQueryEngine.apply(media, albumState, longVideoMs, duplicateIds, problemIds)
-        albumAdapter.submit(filtered, albumState.grouping)
-        updateAlbumCellSize()
-        b.albumTitle.text = if (filtered.size == media.size) "相册 · ${media.size}" else "相册 · ${filtered.size}/${media.size}"
+    private fun updateAlbumResults(onApplied: (() -> Unit)? = null) {
+        val generation = albumRefreshGeneration.incrementAndGet()
+        val source = media.toList()
+        val state = albumState
+        val longThreshold = longVideoMs
+        val duplicates = duplicateIds.toSet()
+        val problems = problemIds.toSet()
         updateFilterChips()
-        if (media.isNotEmpty() && filtered.isEmpty()) {
-            b.scanStatus.visibility = View.VISIBLE
-            b.scanStatus.text = "当前筛选没有结果"
+        albumQueryIo.execute {
+            val filtered = runCatching {
+                AlbumQueryEngine.apply(source, state, longThreshold, duplicates, problems)
+            }.getOrElse { emptyList() }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || generation != albumRefreshGeneration.get()) return@runOnUiThread
+                albumAdapter.submit(filtered, state.grouping) {
+                    if (generation != albumRefreshGeneration.get()) return@submit
+                    updateAlbumCellSize()
+                    b.albumTitle.text = if (filtered.size == source.size) "相册 · ${source.size}" else "相册 · ${filtered.size}/${source.size}"
+                    if (source.isNotEmpty() && filtered.isEmpty()) {
+                        b.scanStatus.visibility = View.VISIBLE
+                        b.scanStatus.text = "当前筛选没有结果"
+                    }
+                    onApplied?.invoke()
+                }
+            }
         }
     }
 
@@ -413,7 +438,18 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         ).count { it }
         b.moreFilterChip.text = if (extraCount > 0) "筛选 · $extraCount" else "筛选"
         style(b.moreFilterChip, extraCount > 0)
-        style(b.sortChip, false)
+        b.sortChip.text = sortLabel(albumState.sort, albumState.descending)
+        style(b.sortChip, albumState.sort != AlbumSort.ADDED_TIME || !albumState.descending)
+    }
+
+    private fun sortLabel(sort: AlbumSort, descending: Boolean): String = when (sort) {
+        AlbumSort.FILE_TIME -> "文件时间 ${if (descending) "↓" else "↑"}"
+        AlbumSort.ADDED_TIME -> "加入时间 ${if (descending) "↓" else "↑"}"
+        AlbumSort.DURATION -> "时长 ${if (descending) "↓" else "↑"}"
+        AlbumSort.SIZE -> "大小 ${if (descending) "↓" else "↑"}"
+        AlbumSort.RECENT_VIEWED -> "最近观看 ${if (descending) "↓" else "↑"}"
+        AlbumSort.NAME -> if (descending) "文件名 Z→A" else "文件名 A→Z"
+        AlbumSort.RANDOM -> "随机排列"
     }
 
     private fun setGridSpan(value: Int) {
@@ -901,7 +937,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             Triple("最近观看 ↓", AlbumSort.RECENT_VIEWED, true), Triple("文件名 A→Z", AlbumSort.NAME, false),
             Triple("文件名 Z→A", AlbumSort.NAME, true), Triple("随机排列", AlbumSort.RANDOM, true)
         )
-        AlertDialog.Builder(this).setTitle("排序").setItems(options.map { it.first }.toTypedArray()) { _, which ->
+        val checked = options.indexOfFirst { it.second == albumState.sort && it.third == albumState.descending }
+        AlertDialog.Builder(this).setTitle("排序").setSingleChoiceItems(options.map { it.first }.toTypedArray(), checked) { dialog, which ->
             val (_, sort, desc) = options[which]
             val grouping = when (sort) {
                 AlbumSort.FILE_TIME -> TimeGrouping.FILE_DAY
@@ -911,8 +948,11 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             val seed = if (sort == AlbumSort.RANDOM) System.nanoTime() else albumState.randomSeed
             albumState = albumState.copy(sort = sort, descending = desc, grouping = grouping, randomSeed = seed)
             if (sort == AlbumSort.RANDOM) prefs.edit().putLong("album_random_seed", seed).apply()
-            updateAlbumResults()
-            b.albumGrid.post { albumAdapter.clearSelection(); albumLayoutManager.scrollToPositionWithOffset(0, 0) }
+            updateAlbumResults {
+                albumAdapter.clearSelection()
+                albumLayoutManager.scrollToPositionWithOffset(0, 0)
+            }
+            dialog.dismiss()
         }.show()
     }
 
@@ -1146,26 +1186,31 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         val taskId = taskCenter.start(if (auto) "自动检查新增文件" else "扫描媒体目录", "正在读取目录")
         repository.scanAll(
             onProgress = { text -> runOnUiThread { taskCenter.update(taskId, text) } },
-            onIndexed = { list, summary -> runOnUiThread {
-                media = list.filterNot { it.id in pendingFileTargetIds() }
-                media.forEach { playbackPositions.putIfAbsent(it.id, it.playbackPositionMs) }
-                session.replaceSource(media)
-                updateAlbumResults()
-                updateEmptyState()
-                if (session.queue.isEmpty() && session.hasVideos()) {
-                    session.rebuild(count = 50); feedAdapter.submit(session.queue)
-                } else if (session.queue.isNotEmpty()) {
-                    currentFeedPosition = currentFeedPosition.coerceAtMost(session.queue.lastIndex).coerceAtLeast(0)
-                    feedAdapter.syncQueue(session.queue)
-                }
-                playback.updateQueue(session.queue)
+            onIndexed = { _, summary -> runOnUiThread {
+                // Keep the visible album/feed stable. Publishing thousands of basic rows here used
+                // to rebuild hidden RecyclerViews on the main thread and crash exactly when quick
+                // indexing completed. New records become visible after their metadata pass.
+                taskCenter.update(taskId, "快速索引完成 · ${summary.discovered} 项 · 正在核对媒体信息")
             } },
             onMetadataDone = { list, summary -> runOnUiThread {
-                media = list.filterNot { it.id in pendingFileTargetIds() }
+                val pendingFiles = summary.pendingUris
+                media = list.filterNot { it.id in pendingFileTargetIds() || it.uri in pendingFiles }
+                media.forEach { playbackPositions.putIfAbsent(it.id, it.playbackPositionMs) }
                 session.replaceSource(media)
-                updateAlbumResults()
+                // Do not diff and bind a hidden grid underneath the player, image viewer or task
+                // centre. It will refresh on showAlbum(); this is especially important at the end
+                // of a 100 GB scan when image caches and metadata work are already under pressure.
+                val albumActuallyVisible = b.albumPanel.visibility == View.VISIBLE &&
+                    b.taskCenterPanel.visibility != View.VISIBLE && b.imageViewerPanel.visibility != View.VISIBLE
+                if (albumActuallyVisible) updateAlbumResults()
                 updateEmptyState()
-                if (session.queue.isNotEmpty()) {
+                if (session.queue.isEmpty() && session.hasVideos()) {
+                    session.rebuild(count = 50)
+                    if (b.feedPager.visibility == View.VISIBLE) {
+                        feedAdapter.submit(session.queue)
+                        playback.updateQueue(session.queue)
+                    }
+                } else if (session.queue.isNotEmpty() && b.feedPager.visibility == View.VISIBLE) {
                     currentFeedPosition = currentFeedPosition.coerceAtMost(session.queue.lastIndex).coerceAtLeast(0)
                     feedAdapter.syncQueue(session.queue); playback.updateQueue(session.queue)
                 }
@@ -1175,6 +1220,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 val detail = "新增 ${summary.newFiles} · 更新 ${summary.updatedFiles} · 问题 $errors"
                 if (summary.authorizationNeeded > 0) taskCenter.fail(taskId, "$detail · ${summary.authorizationNeeded} 个目录需重新授权") else taskCenter.finish(taskId, detail)
                 if (b.feedPager.visibility == View.VISIBLE) b.feedPager.post { settlePage(currentFeedPosition) }
+            } },
+            onFailed = { message -> runOnUiThread {
+                scanInProgress = false
+                taskCenter.fail(taskId, message)
             } }
         )
     }
@@ -1308,7 +1357,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 rootUri = null,
                 folderPrefix = null
             )
-            updateAlbumResults()
+            updateAlbumResults { scrollAlbumToMedia(mediaId) }
+            return
         }
         val position = albumAdapter.adapterPositionForMediaId(mediaId)
         if (position >= 0) b.albumGrid.post {
@@ -1561,27 +1611,32 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             val last = lm?.findLastVisibleItemPosition() ?: first
             comicAdapter.itemAt(if (last >= first) (first + last) / 2 else first)?.let { imageViewerRecord = it; anchor = it.id }
         }
-        b.imageViewerImage.resetZoom(); comicZoom.reset(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList()
+        b.imageViewerImage.resetZoom(); thumbnails.clear(b.imageViewerImage); comicZoom.reset(); comicAdapter.submit(emptyList()); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList()
         b.bottomNav.visibility = View.VISIBLE; b.albumPanel.visibility = View.VISIBLE; showSystemBars(); anchor?.let(::scrollAlbumToMedia)
     }
 
     private fun closeImageViewerIfOpen() {
-        if (b.imageViewerPanel.visibility == View.VISIBLE) { b.imageViewerImage.resetZoom(); comicZoom.reset(); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList() }
+        if (b.imageViewerPanel.visibility == View.VISIBLE) { b.imageViewerImage.resetZoom(); thumbnails.clear(b.imageViewerImage); comicZoom.reset(); comicAdapter.submit(emptyList()); b.comicReader.visibility = View.GONE; b.imageViewerError.visibility = View.GONE; b.imageViewerPanel.visibility = View.GONE; imageViewerRecord = null; imageViewerItems = emptyList() }
     }
 
     private fun settlePage(position: Int) {
         if (b.feedPager.visibility != View.VISIBLE || position !in 0 until feedAdapter.itemCount) return
         val record = feedAdapter.itemAt(position)
         if (record.id != lastSettledMediaId) { repository.markShown(record.id); lastSettledMediaId = record.id }
-        attachAndPlay(position, retry = true)
+        val generation = playRequestGeneration.incrementAndGet()
+        attachAndPlay(position, record.id, generation, attempt = 0)
     }
 
-    private fun attachAndPlay(position: Int, retry: Boolean) {
-        if (position !in 0 until feedAdapter.itemCount) return
+    private fun attachAndPlay(position: Int, mediaId: Long, generation: Int, attempt: Int) {
+        if (generation != playRequestGeneration.get() || position != currentFeedPosition || position !in 0 until feedAdapter.itemCount) return
         val record = feedAdapter.itemAt(position)
+        if (record.id != mediaId) return
         val recycler = b.feedPager.getChildAt(0) as? RecyclerView ?: return
         val holder = recycler.findViewHolderForAdapterPosition(position) as? FeedAdapter.Holder
-        if (holder == null) { if (retry) b.feedPager.post { attachAndPlay(position, retry = false) }; return }
+        if (holder == null) {
+            if (attempt < 30) b.feedPager.postDelayed({ attachAndPlay(position, mediaId, generation, attempt + 1) }, 16L)
+            return
+        }
         val resume = if (record.durationMs >= longVideoMs) playbackPositions[record.id] ?: record.playbackPositionMs else 0L
         playback.play(record, position, holder.binding.playerView, resume)
     }
@@ -1928,7 +1983,15 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     override fun onDestroy() {
-        playback.release(); thumbnails.release(); super.onDestroy()
+        albumQueryIo.shutdownNow(); playback.release(); thumbnails.release(); super.onDestroy()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        thumbnails.trimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            thumbnails.clear(b.imageViewerImage)
+        }
     }
 
 }

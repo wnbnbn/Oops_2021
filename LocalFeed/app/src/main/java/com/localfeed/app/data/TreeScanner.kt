@@ -32,7 +32,11 @@ class TreeScanner(
         val errors: Int
     )
 
-    data class MetadataResult(val errors: Int, val newFileErrors: Int)
+    data class MetadataResult(
+        val errors: Int,
+        val newFileErrors: Int,
+        val failedNewUris: Set<String> = emptySet()
+    )
 
     private data class PendingDir(val documentId: String, val relativeDir: String)
 
@@ -124,6 +128,7 @@ class TreeScanner(
         val resolver = context.contentResolver
         var errors = 0
         var newFileErrors = 0
+        val failedNewUris = linkedSetOf<String>()
         tasks.forEachIndexed { index, task ->
             try {
                 val meta = if (task.kind == MediaKind.VIDEO) videoMetadata(task.uri) else imageMetadata(resolver, task.uri)
@@ -133,7 +138,10 @@ class TreeScanner(
             } catch (e: Exception) {
                 if (task.kind == MediaKind.VIDEO) {
                     errors++
-                    if (task.isNew) newFileErrors++
+                    if (task.isNew) {
+                        newFileErrors++
+                        failedNewUris += task.uri.toString()
+                    }
                     db.recordError(task.uri.toString(), task.name, "元数据", e.javaClass.simpleName + ": " + (e.message ?: "读取失败"))
                 } else {
                     // Animated/modern image formats are often displayable by ImageDecoder even
@@ -143,7 +151,7 @@ class TreeScanner(
             }
             if ((index + 1) % 25 == 0 || index == tasks.lastIndex) onProgress(index + 1, tasks.size)
         }
-        return MetadataResult(errors, newFileErrors)
+        return MetadataResult(errors, newFileErrors, failedNewUris)
     }
 
     private data class Meta(val durationMs: Long, val width: Int, val height: Int, val rotation: Int)

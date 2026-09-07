@@ -167,13 +167,21 @@ class FeedAdapter(
     }
 
     fun showFirstFrame(mediaId: Long) {
-        bound[mediaId]?.get()?.binding?.imageView?.visibility = View.GONE
+        bound[mediaId]?.get()?.binding?.let { binding ->
+            binding.playerView.animate().cancel()
+            binding.playerView.alpha = 1f
+            binding.imageView.visibility = View.GONE
+        }
     }
 
     fun showPlaybackError(mediaId: Long, message: String) {
-        bound[mediaId]?.get()?.binding?.playbackErrorBadge?.apply {
-            text = "这个视频无法正常播放\n$message\n\n文件保留在当前页，可用右侧“更多”查看信息、外部打开或删除"
-            visibility = View.VISIBLE
+        bound[mediaId]?.get()?.binding?.let { binding ->
+            binding.playerView.alpha = 0f
+            binding.imageView.visibility = View.VISIBLE
+            binding.playbackErrorBadge.apply {
+                text = "这个视频无法正常播放\n$message\n\n文件保留在当前页，可用右侧“更多”查看信息、外部打开或删除"
+                visibility = View.VISIBLE
+            }
         }
     }
 
@@ -219,6 +227,7 @@ class FeedAdapter(
 
     override fun onViewRecycled(holder: Holder) {
         holder.cancelTransientGesture()
+        thumbnailLoader.clear(holder.binding.imageView)
         holder.boundId?.let { id ->
             if (bound[id]?.get() === holder) bound.remove(id)
         }
@@ -244,6 +253,8 @@ class FeedAdapter(
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (SystemClock.uptimeMillis() < suppressSingleTapUntil) return true
+                val deadZone = 84f * binding.root.resources.displayMetrics.density
+                if (e.y >= binding.pageRoot.height - deadZone) return true
                 safePosition()?.let(callbacks::onSingleTap)
                 return true
             }
@@ -382,6 +393,7 @@ class FeedAdapter(
             if (item.kind == MediaKind.IMAGE) {
                 binding.imageView.resetZoom()
                 binding.playerView.visibility = View.GONE
+                binding.playerView.alpha = 0f
                 binding.imageView.visibility = View.VISIBLE
                 binding.imageView.scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 binding.imageView.layoutParams = fullFrameParams()
@@ -398,6 +410,7 @@ class FeedAdapter(
             binding.imageView.visibility = View.VISIBLE
             thumbnailLoader.load(item, binding.imageView, 1080)
             binding.playerView.visibility = View.VISIBLE
+            binding.playerView.alpha = 0f
             applySafeInsets()
             applyMediaLayout(item)
             applyChromeVisibility()

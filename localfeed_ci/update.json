@@ -1,0 +1,6 @@
+{
+  "version": "0.7.1",
+  "notes": "修复大媒体库扫描结束闪退、排序卡顿、视频切页串帧、缩略图排队和图片缩放问题。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.1/LocalFeed-v0.7.1.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.7.1/SHA256SUMS.txt"
+}
