@@ -37,6 +37,7 @@ class AlbumAdapter(
     private val dayFormat = SimpleDateFormat("yyyy年M月d日", Locale.CHINA)
     private var cellSizePx: Int = 0
     private var highlightedMediaId: Long? = null
+    private var problemIds: Set<Long> = emptySet()
 
     init { setHasStableIds(true) }
 
@@ -82,6 +83,12 @@ class AlbumAdapter(
         highlightedMediaId = id
         old?.let { adapterPositionForMediaId(it).takeIf { p -> p >= 0 }?.let { p -> notifyItemChanged(p, PAYLOAD_STATE) } }
         id?.let { adapterPositionForMediaId(it).takeIf { p -> p >= 0 }?.let { p -> notifyItemChanged(p, PAYLOAD_STATE) } }
+    }
+
+    fun setProblemIds(ids: Set<Long>) {
+        if (problemIds == ids) return
+        problemIds = ids
+        notifyItemRangeChanged(0, itemCount, PAYLOAD_STATE)
     }
 
     fun isSelectionMode(): Boolean = selected.isNotEmpty()
@@ -219,6 +226,12 @@ class AlbumAdapter(
             }
             b.stateBadge.visibility = if (b.stateBadge.text.isNullOrBlank()) View.GONE else View.VISIBLE
             b.currentBadge.visibility = if (item.id == highlightedMediaId) View.VISIBLE else View.GONE
+            val tier = CardTier.forCount(item.likeCount)
+            b.cardFrame.background = CardTier.frame(item.likeCount, b.root.resources.displayMetrics.density)
+            b.tierBadge.text = tier.badge
+            b.tierBadge.setTextColor(tier.color)
+            b.tierBadge.visibility = if (tier.badge.isBlank()) View.GONE else View.VISIBLE
+            b.problemBadge.visibility = if (item.id in problemIds) View.VISIBLE else View.GONE
         }
 
         fun bindSelection(value: Boolean) {

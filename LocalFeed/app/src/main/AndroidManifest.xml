@@ -4,7 +4,9 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:label="本地流"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="LocalFeed"
         android:theme="@style/Theme.LocalFeed"
         android:supportsRtl="true">
         <activity

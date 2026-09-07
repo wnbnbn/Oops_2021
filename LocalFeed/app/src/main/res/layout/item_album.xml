@@ -13,6 +13,12 @@
         android:scaleType="centerCrop" />
 
     <View
+        android:id="@+id/cardFrame"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no" />
+
+    <View
         android:id="@+id/selectionOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -60,6 +66,22 @@
         android:textSize="14sp" />
 
     <TextView
+        android:id="@+id/tierBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|bottom"
+        android:layout_margin="6dp"
+        android:background="@drawable/media_badge_bg"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
         android:id="@+id/currentBadge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -73,6 +95,23 @@
         android:text="当前"
         android:textColor="@android:color/white"
         android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/problemBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|top"
+        android:layout_margin="6dp"
+        android:background="@drawable/media_badge_bg"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:text="问题"
+        android:textColor="#FFFF8A80"
+        android:textSize="10sp"
         android:textStyle="bold"
         android:visibility="gone" />
 </FrameLayout>

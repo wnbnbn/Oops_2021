@@ -27,6 +27,7 @@ data class ScanSummary(
 )
 
 data class DiagnosticSummary(val checked: Int, val issues: Int)
+private data class DiagnosticFinding(val stage: String, val message: String)
 
 class MediaRepository(private val context: Context) {
     private val db = MediaIndexDb(context)
@@ -211,7 +212,7 @@ class MediaRepository(private val context: Context) {
                 if (problem == null) db.clearError(record.uri, "诊断")
                 else {
                     issues++
-                    db.recordError(record.uri, record.name, "诊断", problem)
+                    db.recordError(record.uri, record.name, problem.stage, problem.message)
                 }
                 onProgress(index + 1, snapshot.size, record.name)
             }
@@ -219,16 +220,16 @@ class MediaRepository(private val context: Context) {
         }
     }
 
-    private fun diagnoseOne(record: MediaRecord): String? = runCatching {
-        if (record.size == 0L) return@runCatching "文件大小为 0，可能尚未下载完成或文件已损坏"
+    private fun diagnoseOne(record: MediaRecord): DiagnosticFinding? = runCatching {
+        if (record.size == 0L) return@runCatching DiagnosticFinding("已确认", "文件大小为 0，可能尚未下载完成或文件已损坏")
         context.contentResolver.openFileDescriptor(Uri.parse(record.uri), "r")?.use { descriptor ->
-            if (descriptor.statSize == 0L) return@runCatching "文件内容为空"
-        } ?: return@runCatching "无法打开文件，目录授权可能失效"
+            if (descriptor.statSize == 0L) return@runCatching DiagnosticFinding("已确认", "文件内容为空")
+        } ?: return@runCatching DiagnosticFinding("已确认", "无法打开文件，目录授权可能失效")
         if (record.kind == com.localfeed.app.core.MediaKind.IMAGE) {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(Uri.parse(record.uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
-                ?: return@runCatching "无法读取图片数据"
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) "无法解码图片尺寸，文件可能损坏或格式不受支持" else null
+                ?: return@runCatching DiagnosticFinding("已确认", "无法读取图片数据")
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) DiagnosticFinding("已确认", "无法解码图片，文件可能损坏或格式不受支持") else null
         } else {
             val retriever = MediaMetadataRetriever()
             val metaProblem = try {
@@ -237,28 +238,29 @@ class MediaRepository(private val context: Context) {
                 val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
                 val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
                 when {
-                    duration <= 0L -> "无法读取有效时长，视频可能不完整"
-                    width <= 0 || height <= 0 -> "无法读取视频尺寸，视频轨道可能损坏"
+                    duration <= 0L -> "系统无法读取时长"
+                    width <= 0 || height <= 0 -> "系统无法读取视频尺寸"
                     else -> null
                 }
             } finally { retriever.release() }
-            if (metaProblem != null) metaProblem else {
-                val extractor = MediaExtractor()
-                try {
-                    extractor.setDataSource(context, Uri.parse(record.uri), null)
-                    val tracks = (0 until extractor.trackCount).mapNotNull { track ->
-                        extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)
-                    }
-                    val video = tracks.firstOrNull { it.startsWith("video/") }
-                    if (video == null) "容器中没有可识别的视频轨道；轨道：${tracks.joinToString().ifBlank { "无" }}"
-                    else null
-                } finally { extractor.release() }
-            }
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(context, Uri.parse(record.uri), null)
+                val tracks = (0 until extractor.trackCount).mapNotNull { track ->
+                    extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)
+                }
+                val video = tracks.firstOrNull { it.startsWith("video/") }
+                when {
+                    video == null -> DiagnosticFinding("已确认", "容器中没有可识别的视频轨道；轨道：${tracks.joinToString().ifBlank { "无" }}")
+                    metaProblem != null -> DiagnosticFinding("待确认", "$metaProblem；但已检测到视频轨道 $video，可尝试本应用或其他播放器")
+                    else -> null
+                }
+            } finally { extractor.release() }
         }
     }.getOrElse { error ->
         when (error) {
-            is SecurityException -> "没有读取权限：${error.message ?: "请重新授权目录"}"
-            else -> "${error.javaClass.simpleName}：${error.message ?: "读取或解析失败"}"
+            is SecurityException -> DiagnosticFinding("已确认", "没有读取权限：${error.message ?: "请重新授权目录"}")
+            else -> DiagnosticFinding("待确认", "${error.javaClass.simpleName}：${error.message ?: "读取或解析失败"}")
         }
     }
 
@@ -275,6 +277,7 @@ class MediaRepository(private val context: Context) {
     }
 
     fun setLiked(id: Long, value: Boolean) = indexIo.execute { db.setLiked(id, value) }
+    fun setLikeCount(id: Long, value: Int) = indexIo.execute { db.setLikeCount(id, value) }
     fun setLikedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setLikedMany(ids, value) }
     fun setFavorited(id: Long, value: Boolean) = indexIo.execute { db.setFavorited(id, value) }
     fun setFavoritedMany(ids: Collection<Long>, value: Boolean) = indexIo.execute { db.setFavoritedMany(ids, value) }

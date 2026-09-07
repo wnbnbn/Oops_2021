@@ -5,7 +5,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaRecord
@@ -35,10 +34,9 @@ class ComicReaderAdapter(private val loader: ThumbnailLoader) : RecyclerView.Ada
             minimumHeight = (240 * density).toInt()
             setBackgroundColor(Color.BLACK)
         }
-        val image = ImageView(parent.context).apply {
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER
+        val image = ZoomImageView(parent.context).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.BLACK)
             contentDescription = "连续阅读图片"
         }
@@ -57,6 +55,14 @@ class ComicReaderAdapter(private val loader: ThumbnailLoader) : RecyclerView.Ada
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val record = items[position]
+        holder.image.resetZoom()
+        val viewportWidth = holder.itemView.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val ratio = record.aspectRatio().takeIf { it in 0.15f..8f } ?: 0.75f
+        val stableHeight = (viewportWidth / ratio).toInt().coerceIn(viewportWidth / 3, viewportWidth * 5)
+        holder.itemView.layoutParams = (holder.itemView.layoutParams as RecyclerView.LayoutParams).apply {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = stableHeight
+        }
         holder.error.visibility = View.GONE
         holder.image.visibility = View.VISIBLE
         loader.load(record, holder.image, 1800) { ok ->
@@ -66,5 +72,5 @@ class ComicReaderAdapter(private val loader: ThumbnailLoader) : RecyclerView.Ada
         }
     }
 
-    class Holder(root: View, val image: ImageView, val error: TextView) : RecyclerView.ViewHolder(root)
+    class Holder(root: View, val image: ZoomImageView, val error: TextView) : RecyclerView.ViewHolder(root)
 }

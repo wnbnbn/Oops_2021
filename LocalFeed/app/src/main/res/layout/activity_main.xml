@@ -196,9 +196,28 @@
             android:visibility="gone" />
         <TextView android:id="@+id/imageViewerBack" android:layout_width="52dp" android:layout_height="52dp" android:layout_gravity="start|top" android:gravity="center" android:text="‹" android:textColor="@android:color/white" android:textSize="40sp" />
         <TextView android:id="@+id/imageViewerDelete" android:layout_width="52dp" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="10dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:text="删除" android:textColor="#FFFF7777" android:textSize="13sp" />
+        <TextView android:id="@+id/imageViewerOpenWith" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="132dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:text="其他应用" android:textColor="@android:color/white" android:textSize="13sp" />
         <TextView android:id="@+id/imageViewerMode" android:layout_width="wrap_content" android:layout_height="40dp" android:layout_gravity="end|top" android:layout_marginTop="6dp" android:layout_marginEnd="70dp" android:background="@drawable/media_badge_bg" android:gravity="center" android:paddingStart="13dp" android:paddingEnd="13dp" android:text="连续阅读" android:textColor="@android:color/white" android:textSize="13sp" />
         <TextView android:id="@+id/imageViewerError" android:layout_width="280dp" android:layout_height="wrap_content" android:layout_gravity="center" android:background="@drawable/media_badge_bg" android:gravity="center" android:padding="16dp" android:text="图片读取失败" android:textColor="@android:color/white" android:textSize="14sp" android:visibility="gone" />
         <TextView android:id="@+id/imageViewerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="start|bottom" android:layout_marginStart="14dp" android:layout_marginEnd="14dp" android:layout_marginBottom="18dp" android:ellipsize="middle" android:maxLines="1" android:textColor="#D9FFFFFF" android:textSize="13sp" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/taskCenterPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF101012"
+        android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="54dp" android:gravity="center_vertical" android:paddingStart="8dp" android:paddingEnd="8dp">
+                <TextView android:id="@+id/taskCenterBack" android:layout_width="48dp" android:layout_height="48dp" android:gravity="center" android:text="‹" android:textColor="@android:color/white" android:textSize="38sp" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="任务中心" android:textColor="@android:color/white" android:textSize="19sp" android:textStyle="bold" />
+                <TextView android:id="@+id/taskCenterClear" android:layout_width="72dp" android:layout_height="44dp" android:gravity="center" android:text="清除完成" android:textColor="#BFFFFFFF" android:textSize="12sp" />
+            </LinearLayout>
+            <TextView android:id="@+id/taskCenterHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="10dp" android:text="删除等写入任务按顺序执行；扫描和诊断独立运行。这里保留结果，不再打断播放。" android:textColor="#8FFFFFFF" android:textSize="12sp" />
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/taskCenterList" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false" android:paddingBottom="24dp" />
+            <TextView android:id="@+id/taskCenterEmpty" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center" android:text="还没有后台任务" android:textColor="#80FFFFFF" android:textSize="14sp" android:visibility="gone" />
+        </LinearLayout>
     </FrameLayout>
 
     <FrameLayout

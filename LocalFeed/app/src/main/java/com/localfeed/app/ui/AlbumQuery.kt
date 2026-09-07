@@ -6,7 +6,7 @@ import com.localfeed.app.core.MediaRecord
 enum class AlbumType { ALL, VIDEO, IMAGE }
 enum class AlbumLength { ANY, SHORT, LONG }
 enum class AlbumOrientation { ANY, LANDSCAPE, PORTRAIT }
-enum class AlbumSpecial { NONE, RECENT_ADDED, RECENT_VIEWED, UNSEEN, LIKED, FAVORITE, LARGE, DUPLICATE }
+enum class AlbumSpecial { NONE, RECENT_ADDED, RECENT_VIEWED, UNSEEN, LIKED, FAVORITE, COLLECTION, PROBLEM, LARGE, DUPLICATE }
 enum class AlbumSort { FILE_TIME, ADDED_TIME, DURATION, SIZE, RECENT_VIEWED, NAME, RANDOM }
 enum class TimeGrouping { NONE, FILE_DAY, ADDED_DAY }
 
@@ -19,7 +19,8 @@ data class AlbumQueryState(
     val folderPrefix: String? = null,
     val sort: AlbumSort = AlbumSort.ADDED_TIME,
     val descending: Boolean = true,
-    val grouping: TimeGrouping = TimeGrouping.ADDED_DAY
+    val grouping: TimeGrouping = TimeGrouping.ADDED_DAY,
+    val randomSeed: Long = 0x4C6F63616C466565L
 )
 
 object AlbumQueryEngine {
@@ -28,6 +29,7 @@ object AlbumQueryEngine {
         state: AlbumQueryState,
         longVideoMs: Long,
         duplicateIds: Set<Long>,
+        problemIds: Set<Long> = emptySet(),
         now: Long = System.currentTimeMillis()
     ): List<MediaRecord> {
         var result = source.asSequence()
@@ -61,11 +63,17 @@ object AlbumQueryEngine {
             AlbumSpecial.UNSEEN -> result.filter { it.showCount == 0 }
             AlbumSpecial.LIKED -> result.filter { it.liked }
             AlbumSpecial.FAVORITE -> result.filter { it.favorited }
+            AlbumSpecial.COLLECTION -> result.filter { it.likeCount >= 6 }
+            AlbumSpecial.PROBLEM -> result.filter { it.id in problemIds }
             AlbumSpecial.LARGE -> result.filter { it.size >= 500L * 1024 * 1024 }
             AlbumSpecial.DUPLICATE -> result.filter { it.id in duplicateIds }
         }
         val list = result.toList()
-        if (state.sort == AlbumSort.RANDOM) return list.shuffled()
+        if (state.sort == AlbumSort.RANDOM) {
+            // A deterministic session seed prevents every DB refresh from replacing the list
+            // underneath the reader. A new seed is generated only when the user asks to reshuffle.
+            return list.sortedBy { stableRandomKey(it.id, state.randomSeed) }
+        }
         val comparator = when (state.sort) {
             AlbumSort.FILE_TIME -> compareBy<MediaRecord> { it.modifiedAt }
             AlbumSort.ADDED_TIME -> compareBy { it.addedAt }
@@ -76,5 +84,12 @@ object AlbumQueryEngine {
             AlbumSort.RANDOM -> compareBy { it.id }
         }
         return list.sortedWith(if (state.descending) comparator.reversed() else comparator)
+    }
+
+    private fun stableRandomKey(id: Long, seed: Long): Long {
+        var z = id xor seed
+        z = (z xor (z ushr 30)) * -4658895280553007687L
+        z = (z xor (z ushr 27)) * -7723592293110705685L
+        return z xor (z ushr 31)
     }
 }

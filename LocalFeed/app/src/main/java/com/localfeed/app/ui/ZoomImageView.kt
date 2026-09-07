@@ -37,7 +37,7 @@ class ZoomImageView @JvmOverloads constructor(
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            setZoom((zoom * detector.scaleFactor).coerceIn(1f, 5f))
+            setZoom((zoom * detector.scaleFactor).coerceIn(1f, 5f), detector.focusX, detector.focusY)
             return true
         }
 
@@ -53,6 +53,7 @@ class ZoomImageView @JvmOverloads constructor(
             return true
         }
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (zoom > 1.01f) resetZoom() else setZoom(2.5f, e.x, e.y)
             onDoubleTap?.invoke()
             return true
         }
@@ -118,10 +119,15 @@ class ZoomImageView @JvmOverloads constructor(
 
     fun isZoomed(): Boolean = zoom > 1.01f
 
-    private fun setZoom(value: Float) {
+    private fun setZoom(value: Float, focusX: Float = width / 2f, focusY: Float = height / 2f) {
+        val oldZoom = zoom
         zoom = value
         scaleX = zoom
         scaleY = zoom
+        if (oldZoom <= 1.01f && zoom > 1.01f) {
+            translationX = (width / 2f - focusX) * (zoom - 1f)
+            translationY = (height / 2f - focusY) * (zoom - 1f)
+        }
         translationX = clampTranslation(translationX, width.toFloat(), zoom)
         translationY = clampTranslation(translationY, height.toFloat(), zoom)
         if (zoom <= 1.01f) resetZoom()

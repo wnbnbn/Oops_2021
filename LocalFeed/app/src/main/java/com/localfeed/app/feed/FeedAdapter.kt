@@ -27,6 +27,7 @@ class FeedAdapter(
 
     interface Callbacks {
         fun onToggleLike(position: Int)
+        fun onResetLike(position: Int)
         fun onLikeFromGesture(position: Int)
         fun onToggleFavorite(position: Int)
         fun onMore(position: Int)
@@ -37,6 +38,7 @@ class FeedAdapter(
         fun onLongPressLock(position: Int)
         fun onLongPressUnlock(position: Int)
         fun onLockedSpeedCancel(position: Int)
+        fun isLockedSpeed(position: Int): Boolean
         fun onSeekStart(position: Int, fraction: Float)
         fun onSeekMove(position: Int, fraction: Float)
         fun onSeekStop(position: Int, fraction: Float, canceled: Boolean)
@@ -55,6 +57,12 @@ class FeedAdapter(
     private var chromeVisible: Boolean = true
     private var bottomSafeInsetPx: Int = 0
     private var globalFillMode: Boolean = true
+    private var actionRailBottomPx: Int = 0
+
+    fun setActionRailBottom(value: Int) {
+        actionRailBottomPx = value.coerceAtLeast(0)
+        bound.values.forEach { it.get()?.applyActionRailPosition() }
+    }
 
     fun setGlobalFillMode(value: Boolean) {
         if (globalFillMode == value) return
@@ -148,6 +156,13 @@ class FeedAdapter(
         bound[mediaId]?.get()?.binding?.imageView?.visibility = View.GONE
     }
 
+    fun showPlaybackError(mediaId: Long, message: String) {
+        bound[mediaId]?.get()?.binding?.playbackErrorBadge?.apply {
+            text = "这个视频无法正常播放\n$message\n\n文件保留在当前页，可用右侧“更多”查看信息、外部打开或删除"
+            visibility = View.VISIBLE
+        }
+    }
+
     fun cancelTransientGestures() {
         bound.values.forEach { it.get()?.cancelTransientGesture(clearLockedIndicator = true) }
     }
@@ -231,7 +246,7 @@ class FeedAdapter(
                 val p = safePosition() ?: return
                 if (itemAt(p).kind == MediaKind.VIDEO && !scrubbing && !longPressed) {
                     longPressed = true
-                    cancelLockedGesture = lockedIndicatorVisible
+                    cancelLockedGesture = callbacks.isLockedSpeed(p)
                     longPressLocked = false
                     longPressStartY = e.y
                     binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(true)
@@ -244,6 +259,7 @@ class FeedAdapter(
 
         init {
             binding.likeButton.setOnClickListener { safePosition()?.let(callbacks::onToggleLike) }
+            binding.likeButton.setOnLongClickListener { safePosition()?.let(callbacks::onResetLike); true }
             binding.favoriteButton.setOnClickListener { safePosition()?.let(callbacks::onToggleFavorite) }
             binding.moreButton.setOnClickListener { safePosition()?.let(callbacks::onMore) }
             binding.fullscreenButton.setOnClickListener { safePosition()?.let(callbacks::onFullscreen) }
@@ -337,6 +353,7 @@ class FeedAdapter(
             binding.progress.visibility = if (item.kind == MediaKind.VIDEO) View.VISIBLE else View.GONE
             binding.speedBadge.visibility = View.GONE
             binding.pauseBadge.visibility = View.GONE
+            binding.playbackErrorBadge.visibility = View.GONE
             binding.timePreview.visibility = View.GONE
             binding.likeBurst.visibility = View.GONE
 
@@ -362,6 +379,7 @@ class FeedAdapter(
             applySafeInsets()
             applyMediaLayout(item)
             applyChromeVisibility()
+            applyActionRailPosition()
         }
 
         fun updateStateOnly(item: MediaRecord) {
@@ -371,6 +389,8 @@ class FeedAdapter(
 
         fun updateLike(item: MediaRecord) {
             binding.likeIcon.setImageResource(if (item.liked) com.localfeed.app.R.drawable.ic_heart_filled else com.localfeed.app.R.drawable.ic_heart_outline)
+            binding.likeCount.text = item.likeCount.toString()
+            binding.likeCount.visibility = if (item.likeCount > 0) View.VISIBLE else View.GONE
         }
 
         fun updateFavorite(item: MediaRecord) {
@@ -423,6 +443,16 @@ class FeedAdapter(
             }
         }
 
+        fun applyActionRailPosition() {
+            if (actionRailBottomPx <= 0) return
+            (binding.rightActions.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                if (lp.bottomMargin != actionRailBottomPx) {
+                    lp.bottomMargin = actionRailBottomPx
+                    binding.rightActions.layoutParams = lp
+                }
+            }
+        }
+
         fun applyChromeVisibility() {
             binding.rightActions.visibility = if (chromeVisible && !landscapeFeed) View.VISIBLE else View.GONE
             binding.progress.visibility = if (chromeVisible && safePosition()?.let { itemAt(it).kind == MediaKind.VIDEO } == true) View.VISIBLE else View.GONE
@@ -456,8 +486,14 @@ class FeedAdapter(
             binding.pageRoot.parent?.requestDisallowInterceptTouchEvent(false)
             if (cancelLockedGesture) {
                 cancelLockedGesture = false
-                binding.speedBadge.text = "2.0× 已锁定 · 再次长按下滑取消"
-                binding.speedBadge.visibility = View.VISIBLE
+                if (callbacks.isLockedSpeed(safePosition() ?: -1)) {
+                    lockedIndicatorVisible = true
+                    binding.speedBadge.text = "2.0× 已锁定 · 点击或长按下滑取消"
+                    binding.speedBadge.visibility = View.VISIBLE
+                } else {
+                    lockedIndicatorVisible = false
+                    binding.speedBadge.visibility = View.GONE
+                }
                 return
             }
             if (!longPressLocked) {
