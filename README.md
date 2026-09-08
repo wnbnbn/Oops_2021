@@ -4,7 +4,7 @@ LocalFeed 是一个 Android 本地媒体浏览器，提供短视频式纵向 Fee
 
 > 当前开发分支：`localfeed-build`
 >
-> 当前版本：`0.8.0`（versionCode 16）
+> 当前版本：`0.8.1`（versionCode 17）
 >
 > Android 包名：`com.localfeed.app`
 >

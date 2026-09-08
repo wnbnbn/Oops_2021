@@ -1,4 +1,4 @@
-# LocalFeed Android 工程手册（v0.8.0）
+# LocalFeed Android 工程手册（v0.8.1）
 
 Android 本地视频随机 Feed + 图片/视频相册。普通目录通过 SAF 授权，`.nomedia` 避免常规图库索引；不提供加密。
 
@@ -10,12 +10,12 @@ JDK 17、Gradle 9.6.0、Android SDK 36 / build-tools 36.0.0。
 AGP 9.4.0 自带 Kotlin，Media3 1.11.0。依赖版本沿用已验证的 GitHub v0.5 分支。
 
 在本目录执行 `gradle :app:assembleDebug --no-daemon`。安装 kotlinc 后可执行 `bash tools/run-smoke-tests.sh`。
-GitHub Actions 的 `LocalFeed v0.8.0 Compile and Release` 直接构建本目录，已停止源码分片还原。
+GitHub Actions 的 `LocalFeed v0.8.1 Compile and Release` 直接构建本目录，已停止源码分片还原。
 根目录的 `localfeed_ci/v05_source_sha256.json` 校验每个源文件内容，编译前须通过。
 
 CI 使用既有固定测试 key 重签并检查 APK 实际证书 SHA256：
 `2F:CF:7E:D9:C4:82:3A:A9:58:9C:53:10:2B:55:9D:E2:74:B7:AB:84:F6:36:DE:D7:99:57:AA:88:74:6A:B7:A6`。
-这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 16 / versionName 0.8.0。
+这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 17 / versionName 0.8.1。
 
 ## 开发入口
 

@@ -18,6 +18,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 data class UpdateInfo(
     val version: String,
@@ -64,26 +67,35 @@ class AppUpdater(
     }
 
     private fun fetchLatest(): UpdateInfo {
-        var lastError: Throwable? = null
-        UPDATE_MANIFESTS.forEach { endpoint ->
-            try {
-                val text = readText(endpoint + if (endpoint.contains('?')) "&t=${System.currentTimeMillis()}" else "?t=${System.currentTimeMillis()}")
-                val root = JSONObject(text)
-                val version = normalizeVersion(root.optString("version"))
-                val apk = root.optString("apk_url")
-                if (version.isNotBlank() && apk.isNotBlank()) {
-                    val checksum = root.optString("checksum_url").takeIf { it.isNotBlank() }
-                    return UpdateInfo(version, root.optString("notes"), apk, checksum)
-                }
-            } catch (error: Throwable) {
-                lastError = error
-            }
-        }
+        val executor = Executors.newFixedThreadPool(UPDATE_SOURCE_COUNT)
+        val tasks = listOf(
+            Callable { parseManifest(readText(cacheBusted(RAW_MANIFEST))) },
+            Callable { parseRelease(readText(RELEASE_API, githubApi = true)) },
+            Callable { parseManifest(readText(cacheBusted(CDN_MANIFEST))) }
+        )
         return try {
-            parseRelease(readText(RELEASE_API, githubApi = true))
-        } catch (error: Throwable) {
-            throw IllegalStateException(lastError?.message ?: error.message ?: "更新服务暂时不可用", error)
+            val results = executor.invokeAll(tasks, UPDATE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .mapNotNull { future ->
+                    if (future.isCancelled) null else runCatching { future.get() }.getOrNull()
+                }
+            results.maxWithOrNull { left, right -> compareVersions(left.version, right.version) }
+                ?: throw IllegalStateException("更新服务暂时不可用")
+        } finally {
+            executor.shutdownNow()
         }
+    }
+
+    private fun parseManifest(text: String): UpdateInfo {
+        val root = JSONObject(text)
+        val version = normalizeVersion(root.optString("version"))
+        val apk = root.optString("apk_url")
+        require(version.isNotBlank() && apk.isNotBlank()) { "更新清单缺少版本或 APK" }
+        return UpdateInfo(
+            version = version,
+            notes = root.optString("notes"),
+            apkUrl = apk,
+            checksumUrl = root.optString("checksum_url").takeIf { it.isNotBlank() }
+        )
     }
 
     private fun parseRelease(text: String): UpdateInfo {
@@ -109,6 +121,8 @@ class AppUpdater(
         connection.readTimeout = 9_000
         if (githubApi) connection.setRequestProperty("Accept", "application/vnd.github+json")
         connection.setRequestProperty("User-Agent", "LocalFeed/${BuildConfig.VERSION_NAME}")
+        connection.setRequestProperty("Cache-Control", "no-cache, no-store")
+        connection.setRequestProperty("Pragma", "no-cache")
         return try {
             require(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
             connection.inputStream.bufferedReader().use { it.readText() }
@@ -245,6 +259,9 @@ class AppUpdater(
 
     private fun normalizeVersion(raw: String): String = Regex("\\d+(?:\\.\\d+){1,3}").find(raw)?.value.orEmpty()
 
+    private fun cacheBusted(url: String): String =
+        url + if (url.contains('?')) "&t=${System.currentTimeMillis()}" else "?t=${System.currentTimeMillis()}"
+
     private fun compareVersions(a: String, b: String): Int {
         val left = a.split('.').map { it.toIntOrNull() ?: 0 }
         val right = b.split('.').map { it.toIntOrNull() ?: 0 }
@@ -256,11 +273,11 @@ class AppUpdater(
     }
 
     companion object {
-        private val UPDATE_MANIFESTS = listOf(
-            "https://cdn.jsdelivr.net/gh/wnbnbn/Oops_2021@localfeed-build/localfeed_ci/update.json",
-            "https://raw.githubusercontent.com/wnbnbn/Oops_2021/localfeed-build/localfeed_ci/update.json"
-        )
+        private const val RAW_MANIFEST = "https://raw.githubusercontent.com/wnbnbn/Oops_2021/localfeed-build/localfeed_ci/update.json"
+        private const val CDN_MANIFEST = "https://cdn.jsdelivr.net/gh/wnbnbn/Oops_2021@localfeed-build/localfeed_ci/update.json"
         private const val RELEASE_API = "https://api.github.com/repos/wnbnbn/Oops_2021/releases/latest"
+        private const val UPDATE_SOURCE_COUNT = 3
+        private const val UPDATE_DEADLINE_SECONDS = 11L
         private const val APK_MIME = "application/vnd.android.package-archive"
     }
 }
