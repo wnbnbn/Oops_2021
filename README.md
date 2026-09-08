@@ -4,7 +4,7 @@ LocalFeed 是一个 Android 本地媒体浏览器，提供短视频式纵向 Fee
 
 > 当前开发分支：`localfeed-build`
 >
-> 当前版本：`0.7.3`（versionCode 15）
+> 当前版本：`0.8.0`（versionCode 16）
 >
 > Android 包名：`com.localfeed.app`
 >
@@ -118,15 +118,15 @@ flowchart TD
 - `FeedSession.kt`：维护随机或有序视频队列。图片永远不会进入该队列。
 - `WeightedFeedEngine.kt`：随机选择及轻度偏好；保证相同视频不会紧邻重复。
 - `FeedAdapter.kt`：ViewPager 页面、真实缩略图、操作按钮、倍速手势和进度条。
-- `PlaybackCoordinator.kt`：全应用复用一个 ExoPlayer，在页面之间移动同一个 PlayerView 目标。
+- `PlaybackCoordinator.kt`：三播放器滑动窗口、相邻页预准备、唯一活动音频与播放器回收。
 
 播放器首帧规则非常重要：
 
 1. 页面跟手移动时先显示该视频自己的缩略图。
-2. 页面稳定后，只有当前播放请求可以挂载播放器。
-3. ExoPlayer 的当前 `mediaId` 必须等于页面媒体 ID。
-4. 真实首帧到达后，缩略图以短交叉淡出退出。
-5. 不要假设 `STATE_READY` 与 `onRenderedFirstFrame()` 的固定先后顺序，不同编码器的回调顺序不同。
+2. 已附着的当前页和相邻页分别持有池中的播放器，不跨页面移动 Surface。
+3. 相邻页暂停、静音并提前准备；只有稳定选中页可以播放声音。
+4. 真实首帧按具体 PlayerView 归属，出现后直接撤掉该页面缩略图。
+5. 不要把播放链路改回单播放器 `switchTargetView + prepare`，也不要用 Alpha 动画掩盖首帧切换。
 
 ### 相册与图片阅读
 
@@ -260,7 +260,7 @@ python3 localfeed_ci/verify_v05_source.py
 
 ## 当前边界与后续重点
 
-- 快速连续切换视频时，当前视频缩略图与真实首帧采用短交叉淡出；仍需在目标 ColorOS 设备验证不同编码格式。
+- 视频 Feed 已改为三播放器滑动窗口；仍需在目标 ColorOS 设备验证快速连续切换及不同编码器并发上限。
 - 超大媒体库最终快照已经按页读取，但尚未完成万级媒体、持续扫描与批量删除并发的一小时压力测试。
 - 相册查询在后台线程执行，大范围分类直接替换列表；后续可进一步把数据库层改为真正的分页 UI 数据源。
 - Android SAF 没有可靠的跨应用实时目录通知。当前在应用从后台返回时自动检查，也保留手动扫描。

@@ -10,8 +10,8 @@ android {
         applicationId = "com.localfeed.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.7.3"
+        versionCode = 16
+        versionName = "0.8.0"
     }
 
     buildFeatures {
@@ -36,5 +36,6 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.1.0")
 
     implementation("androidx.media3:media3-exoplayer:1.11.0")
+    implementation("androidx.media3:media3-common-ktx:1.11.0")
     implementation("androidx.media3:media3-ui:1.11.0")
 }

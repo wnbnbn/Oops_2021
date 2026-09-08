@@ -327,9 +327,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                     feedAdapter.append(session.queue.subList(oldSize, session.queue.size))
                     playback.updateQueue(session.queue)
                 }
-                // During a fling, only the final settled page is allowed to own the player. Each
-                // page already displays its own poster, so keeping the old decoder attached here
-                // would leak the previous frame into the next TextureView.
+                // Attached neighbouring pages prepare their own pooled players. Only the final
+                // settled page is activated; the previous page keeps playing while following the
+                // finger so a fast fling never creates an intentional pause gap.
                 if (pagerScrollState == ViewPager2.SCROLL_STATE_IDLE) settlePage(position)
             }
 
@@ -338,7 +338,6 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 if (state != ViewPager2.SCROLL_STATE_IDLE) {
                     playRequestGeneration.incrementAndGet()
                     playback.cancelTemporaryBoost()
-                    playback.pauseOnly()
                 }
                 if (state == ViewPager2.SCROLL_STATE_IDLE) settlePage(currentFeedPosition)
             }
@@ -1671,7 +1670,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             return
         }
         val resume = if (record.durationMs >= longVideoMs) playbackPositions[record.id] ?: record.playbackPositionMs else 0L
-        playback.play(record, position, holder.binding.playerView, resume)
+        playback.play(record, position, holder.binding.playerView, resume, record.durationMs < longVideoMs)
     }
 
     override fun onToggleLike(position: Int) {
@@ -1739,13 +1738,25 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     override fun isLockedSpeed(position: Int): Boolean = isCurrentVideo(position) && playback.isLocked2x()
     override fun onSeekStart(position: Int, fraction: Float) {
         if (!isCurrentVideo(position)) return
-        playback.cancelTemporaryBoost(); resumeAfterScrub = playback.player.isPlaying; if (resumeAfterScrub) playback.pauseOnly()
+        playback.cancelTemporaryBoost(); resumeAfterScrub = playback.isPlaying(); if (resumeAfterScrub) playback.pauseOnly()
     }
     override fun onSeekMove(position: Int, fraction: Float) { }
     override fun onSeekStop(position: Int, fraction: Float, canceled: Boolean) {
         if (!isCurrentVideo(position)) return
         if (!canceled) playback.seekToFraction(fraction)
-        if (resumeAfterScrub) playback.player.play(); resumeAfterScrub = false
+        if (resumeAfterScrub) playback.resume(); resumeAfterScrub = false
+    }
+
+    override fun onVideoPageBound(position: Int, mediaId: Long, view: androidx.media3.ui.PlayerView) {
+        if (position !in 0 until feedAdapter.itemCount) return
+        val record = feedAdapter.itemAt(position)
+        if (record.id != mediaId || record.kind != MediaKind.VIDEO) return
+        val resume = if (record.durationMs >= longVideoMs) playbackPositions[record.id] ?: record.playbackPositionMs else 0L
+        playback.preparePage(record, position, view, resume, record.durationMs < longVideoMs)
+    }
+
+    override fun onVideoPageDetached(mediaId: Long, view: androidx.media3.ui.PlayerView) {
+        playback.releasePage(mediaId, view)
     }
 
     private fun isCurrentVideo(position: Int): Boolean = position == currentFeedPosition && position in 0 until feedAdapter.itemCount && feedAdapter.itemAt(position).kind == MediaKind.VIDEO
@@ -1942,7 +1953,9 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         feedAdapter.updatePlaybackProgress(mediaId, positionMs, durationMs)
     }
     override fun onPlayingChanged(mediaId: Long, isPlaying: Boolean) { feedAdapter.updatePlayingState(mediaId, isPlaying) }
-    override fun onFirstFrame(mediaId: Long) { feedAdapter.showFirstFrame(mediaId) }
+    override fun onFirstFrame(mediaId: Long, view: androidx.media3.ui.PlayerView) {
+        feedAdapter.showFirstFrame(mediaId, view)
+    }
 
     private fun savePlaybackPosition(mediaId: Long) {
         val position = playbackPositions[mediaId] ?: return

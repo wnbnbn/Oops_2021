@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.util.Size
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
 import android.util.LruCache
@@ -27,7 +28,10 @@ import kotlin.math.max
  */
 class ThumbnailLoader(private val context: Context) {
     // Foreground posters must never sit behind thousands of album thumbnails.
-    private val foregroundExecutor = Executors.newFixedThreadPool(2) { r -> Thread(r, "thumb-visible") }
+    // A second MediaMetadataRetriever can compete with the three-player feed for hardware codec
+    // and storage bandwidth. One foreground extraction is enough; prepared page players provide
+    // the real neighbouring first frames.
+    private val foregroundExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "thumb-visible") }
     private val backgroundExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "thumb-album") }
     private val cacheDir = File(context.cacheDir, "thumbs_v2").apply { mkdirs() }
     private val jobs = Collections.synchronizedMap(WeakHashMap<ImageView, Future<*>>())
@@ -143,6 +147,11 @@ class ThumbnailLoader(private val context: Context) {
     }
 
     private fun decodeVideo(uri: Uri, target: Int): Bitmap? {
+        if (Build.VERSION.SDK_INT >= 29) {
+            runCatching {
+                context.contentResolver.loadThumbnail(uri, Size(target, target), null)
+            }.getOrNull()?.let { return it }
+        }
         val mmr = MediaMetadataRetriever()
         return try {
             mmr.setDataSource(context, uri)

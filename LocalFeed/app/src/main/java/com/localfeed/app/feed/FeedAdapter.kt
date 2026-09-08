@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.graphics.Rect
 import androidx.core.view.ViewCompat
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.RecyclerView
 import com.localfeed.app.core.MediaKind
 import com.localfeed.app.core.MediaRecord
@@ -17,6 +18,7 @@ import com.localfeed.app.databinding.ItemFeedBinding
 import com.localfeed.app.media.ThumbnailLoader
 import com.localfeed.app.ui.FeedProgressView
 import java.lang.ref.WeakReference
+import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
@@ -43,6 +45,8 @@ class FeedAdapter(
         fun onSeekStart(position: Int, fraction: Float)
         fun onSeekMove(position: Int, fraction: Float)
         fun onSeekStop(position: Int, fraction: Float, canceled: Boolean)
+        fun onVideoPageBound(position: Int, mediaId: Long, view: PlayerView)
+        fun onVideoPageDetached(mediaId: Long, view: PlayerView)
     }
 
     companion object {
@@ -53,6 +57,7 @@ class FeedAdapter(
 
     private val items = mutableListOf<MediaRecord>()
     private val bound = ConcurrentHashMap<Long, WeakReference<Holder>>()
+    private val playerViews = IdentityHashMap<PlayerView, WeakReference<Holder>>()
 
     var landscapeFeed: Boolean = false
         private set
@@ -166,21 +171,14 @@ class FeedAdapter(
         holder.binding.pauseBadge.visibility = if (isPlaying) View.GONE else View.VISIBLE
     }
 
-    fun showFirstFrame(mediaId: Long) {
-        val holder = bound[mediaId]?.get() ?: return
+    fun showFirstFrame(mediaId: Long, view: PlayerView) {
+        val holder = playerViews[view]?.get()?.takeIf { it.boundId == mediaId } ?: return
         holder.binding.let { binding ->
             binding.playerView.animate().cancel()
             binding.playerView.alpha = 1f
-            // The poster belongs to the current video, but an immediate GONE still reads as a
-            // one-frame flash during a fast fling. Cross-fade only after the decoder owns a frame.
             binding.imageView.animate().cancel()
-            binding.imageView.animate()
-                .alpha(0f)
-                .setDuration(90L)
-                .withEndAction {
-                    if (holder.boundId == mediaId) binding.imageView.visibility = View.GONE
-                }
-                .start()
+            binding.imageView.alpha = 1f
+            if (holder.boundId == mediaId) binding.imageView.visibility = View.GONE
         }
     }
 
@@ -216,6 +214,8 @@ class FeedAdapter(
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         holder.bind(items[position])
+        val item = items[position]
+        if (item.kind == MediaKind.VIDEO) callbacks.onVideoPageBound(position, item.id, holder.binding.playerView)
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
@@ -239,10 +239,25 @@ class FeedAdapter(
     override fun onViewRecycled(holder: Holder) {
         holder.cancelTransientGesture()
         thumbnailLoader.clear(holder.binding.imageView)
+        playerViews.remove(holder.binding.playerView)
         holder.boundId?.let { id ->
             if (bound[id]?.get() === holder) bound.remove(id)
         }
         super.onViewRecycled(holder)
+    }
+
+    override fun onViewAttachedToWindow(holder: Holder) {
+        super.onViewAttachedToWindow(holder)
+        val position = holder.bindingAdapterPosition
+        if (position in items.indices) {
+            val item = items[position]
+            if (item.kind == MediaKind.VIDEO) callbacks.onVideoPageBound(position, item.id, holder.binding.playerView)
+        }
+    }
+
+    override fun onViewDetachedFromWindow(holder: Holder) {
+        holder.boundId?.let { callbacks.onVideoPageDetached(it, holder.binding.playerView) }
+        super.onViewDetachedFromWindow(holder)
     }
 
     inner class Holder(val binding: ItemFeedBinding) : RecyclerView.ViewHolder(binding.root) {
@@ -390,6 +405,7 @@ class FeedAdapter(
             boundId?.let { old -> if (bound[old]?.get() === this) bound.remove(old) }
             boundId = item.id
             bound[item.id] = WeakReference(this)
+            playerViews[binding.playerView] = WeakReference(this)
             durationMs = item.durationMs
             lastPositionMs = 0L
             scrubbing = false
@@ -423,7 +439,7 @@ class FeedAdapter(
             binding.imageView.visibility = View.VISIBLE
             thumbnailLoader.load(item, binding.imageView, 1080)
             binding.playerView.visibility = View.VISIBLE
-            binding.playerView.alpha = 0f
+            binding.playerView.alpha = 1f
             applySafeInsets()
             applyMediaLayout(item)
             applyChromeVisibility()

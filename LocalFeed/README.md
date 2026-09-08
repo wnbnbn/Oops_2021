@@ -1,4 +1,4 @@
-# LocalFeed Android 工程手册（v0.7.3）
+# LocalFeed Android 工程手册（v0.8.0）
 
 Android 本地视频随机 Feed + 图片/视频相册。普通目录通过 SAF 授权，`.nomedia` 避免常规图库索引；不提供加密。
 
@@ -10,12 +10,12 @@ JDK 17、Gradle 9.6.0、Android SDK 36 / build-tools 36.0.0。
 AGP 9.4.0 自带 Kotlin，Media3 1.11.0。依赖版本沿用已验证的 GitHub v0.5 分支。
 
 在本目录执行 `gradle :app:assembleDebug --no-daemon`。安装 kotlinc 后可执行 `bash tools/run-smoke-tests.sh`。
-GitHub Actions 的 `LocalFeed v0.7.3 Compile and Release` 直接构建本目录，已停止源码分片还原。
+GitHub Actions 的 `LocalFeed v0.8.0 Compile and Release` 直接构建本目录，已停止源码分片还原。
 根目录的 `localfeed_ci/v05_source_sha256.json` 校验每个源文件内容，编译前须通过。
 
 CI 使用既有固定测试 key 重签并检查 APK 实际证书 SHA256：
 `2F:CF:7E:D9:C4:82:3A:A9:58:9C:53:10:2B:55:9D:E2:74:B7:AB:84:F6:36:DE:D7:99:57:AA:88:74:6A:B7:A6`。
-这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 15 / versionName 0.7.3。
+这把 key 历史上公开，仅用于测试。未改应用包名，versionCode 16 / versionName 0.8.0。
 
 ## 开发入口
 
@@ -24,7 +24,7 @@ CI 使用既有固定测试 key 重签并检查 APK 实际证书 SHA256：
 - `data/MediaIndexDb.kt`：schema 10、媒体记录和用户状态；常规列表必须明确投影字段并分页读取。
 - `data/TreeScanner.kt`：SAF 快速索引与增量元数据分析。
 - `feed/FeedSession.kt`：主动 Feed 的随机队列，以及从相册进入时的有序队列。
-- `feed/PlaybackCoordinator.kt`：唯一 ExoPlayer 的生命周期、媒体请求代次和首帧回调。
+- `media/PlaybackCoordinator.kt`：三播放器池、滑动窗口、预加载媒体源和首帧归属。
 - `feed/FeedAdapter.kt`：视频页面、当前媒体缩略图、手势、按钮和进度条。
 - `gallery/ThumbnailLoader.kt`：相册、首帧和阅读大图的异步加载及缓存隔离。
 - `tasks/TaskCenter.kt`：可恢复长任务、进度限频写盘和历史状态。
@@ -38,8 +38,8 @@ CI 使用既有固定测试 key 重签并检查 APK 实际证书 SHA256：
 - 从排序/筛选相册进入时沿用相册顺序；主动进入 Feed 才随机。
 - 常规媒体快照禁止 `SELECT *`，禁止把视觉哈希或完整哈希塞进相册 Cursor；当前每页 200 项。
 - 文件删除、元数据写入和最终媒体快照受同一存储锁保护，避免分页期间集合变化。
-- 页面只允许在媒体 ID 和播放请求代次都匹配时接收播放器或首帧回调。
-- 当前视频缩略图必须保留到真实首帧出现，再短淡出；不能用提前隐藏换取表面上的“无闪”。
+- 页面首帧必须同时匹配媒体 ID 与具体 PlayerView；随机队列允许同一媒体出现在不同位置。
+- 相邻页应在附着后提前准备，页面选中时不得重新清 Surface、换绑单播放器或冷启动。
 - 扫描、排序、Diff、缩略图解码和哈希不得占用主线程。
 - 不更换 `applicationId` 或测试签名，否则已有安装无法直接覆盖。
 
