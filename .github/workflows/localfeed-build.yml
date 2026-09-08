@@ -1,0 +1,16 @@
+name: LocalFeed Android Build
+
+on:
+  push:
+    branches:
+      - localfeed-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate workflow
+        run: echo "LocalFeed workflow is valid"
