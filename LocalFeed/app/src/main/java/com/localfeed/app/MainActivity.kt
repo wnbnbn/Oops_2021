@@ -131,6 +131,19 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
 
     private val prefs by lazy { getSharedPreferences("localfeed_ui", MODE_PRIVATE) }
 
+    private var deferredAlbumRefresh=false
+    private val cardHall = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if(result.resultCode==RESULT_OK && ::repository.isInitialized) {
+            val ids=(result.data?.getLongArrayExtra("card_delete_ids") ?: longArrayOf()).take(1)
+            val pending=pendingFileTargetIds()
+            val records=ids.mapNotNull(repository::mediaById).filter { it.id !in pending && it.trashedAt==0L }
+            if(records.isNotEmpty()) {
+                if(result.data?.getBooleanExtra("card_delete_permanent",false)==true) batchPermanentDelete(records)
+                else batchTrash(records)
+            } else if(ids.isNotEmpty()) Toast.makeText(this,"文件已移除或已在删除队列中",Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri ?: return@registerForActivityResult
         handlePickedFolder(uri)
@@ -424,7 +437,19 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     private fun pendingFileTargetIds(): Set<Long> = taskCenter.resumable()
         .flatMapTo(hashSetOf()) { it.targetIds }
 
+    private fun refreshAlbumWhenVisible() {
+        if(deferredAlbumRefresh && ::b.isInitialized && hasWindowFocus() &&
+            b.albumPanel.visibility==View.VISIBLE && b.taskCenterPanel.visibility!=View.VISIBLE &&
+            b.imageViewerPanel.visibility!=View.VISIBLE && b.feedPager.visibility!=View.VISIBLE) updateAlbumResults()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if(hasFocus) refreshAlbumWhenVisible()
+    }
+
     private fun updateAlbumResults(onApplied: (() -> Unit)? = null) {
+        deferredAlbumRefresh=false
         val generation = albumRefreshGeneration.incrementAndGet()
         val source = media.toList()
         val state = albumState
@@ -724,7 +749,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 9 -> showLongVideoThresholdDialog()
                 10 -> showMediaStatistics()
                 11 -> appUpdater.check()
-                12 -> { playback.pauseOnly(); startActivity(Intent(this, com.localfeed.app.ui.CardHallActivity::class.java)) }
+                12 -> { playback.pauseOnly(); cardHall.launch(Intent(this, com.localfeed.app.ui.CardHallActivity::class.java)) }
                 13 -> showInboxMenu()
             }
         }.show()
@@ -1277,9 +1302,8 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 // Do not diff and bind a hidden grid underneath the player, image viewer or task
                 // centre. It will refresh on showAlbum(); this is especially important at the end
                 // of a 100 GB scan when image caches and metadata work are already under pressure.
-                val albumActuallyVisible = b.albumPanel.visibility == View.VISIBLE &&
-                    b.taskCenterPanel.visibility != View.VISIBLE && b.imageViewerPanel.visibility != View.VISIBLE
-                if (albumActuallyVisible) updateAlbumResults()
+                deferredAlbumRefresh=true
+                refreshAlbumWhenVisible()
                 updateEmptyState()
                 if (session.queue.isEmpty() && session.hasVideos()) {
                     session.rebuild(count = 50)
@@ -1298,7 +1322,22 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 if (summary.authorizationNeeded > 0) taskCenter.fail(taskId, "$detail · ${summary.authorizationNeeded} 个目录需重新授权") else taskCenter.finish(taskId, detail)
                 if (b.feedPager.visibility == View.VISIBLE) b.feedPager.post { settlePage(currentFeedPosition) }
             } },
-            onInboxEvent = { event -> taskCenter.reportInbox(event) },
+            onInboxEvent = { event -> if(!isDestroyed && !isFinishing) taskCenter.reportInbox(event) },
+            onInboxIndexed = { update -> runOnUiThread {
+                if(isDestroyed || isFinishing) return@runOnUiThread
+                val movedAway=media.filter { it.id in update.removedIds }
+                // Only a physically removed source can invalidate an active queue item.
+                // New arrivals must never reshuffle or detach the currently playing video.
+                if(movedAway.isNotEmpty() && session.queue.any { it.id in update.removedIds }) excludeFromActiveUi(movedAway)
+                val pending=pendingFileTargetIds()
+                val merged=media.filterNot { it.id in update.removedIds }.associateByTo(linkedMapOf()) { it.id }
+                update.records.filterNot { it.id in pending }.forEach { merged[it.id]=it }
+                media=merged.values.toList()
+                session.replaceSource(media)
+                deferredAlbumRefresh=true
+                refreshAlbumWhenVisible()
+                updateEmptyState()
+            } },
             onFailed = { message -> runOnUiThread {
                 scanInProgress = false
                 taskCenter.fail(taskId, message)

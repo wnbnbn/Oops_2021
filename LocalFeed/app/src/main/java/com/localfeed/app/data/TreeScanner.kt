@@ -124,12 +124,38 @@ class TreeScanner(
         return BasicResult(discovered, indexed, newFiles, updatedFiles, unchangedFiles, newNames, tasks, errors)
     }
 
+    /** Index one committed leaf. Never prune a root from an incremental arrival. */
+    fun indexArchived(treeUri: Uri, archivedUri: Uri): MediaRecord? {
+        val uri=DocumentsContract.buildDocumentUriUsingTree(treeUri,DocumentsContract.getDocumentId(archivedUri))
+        val record=context.contentResolver.query(uri,arrayOf(
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        ),null,null,null)?.use { cursor ->
+            check(cursor.moveToFirst()) { "归档文件未返回索引信息" }
+            val name=cursor.getString(0) ?: ""
+            if (name.startsWith(".localfeed-") || name.endsWith(".part")) return null
+            val rawMime=cursor.getString(1) ?: "application/octet-stream"
+            val kind=mediaKind(rawMime,name) ?: return null
+            MediaRecord(id=-1L,uri=uri.toString(),rootUri=treeUri.toString(),relativePath=name,
+                name=name,mime=if(rawMime=="application/octet-stream") guessMime(name,kind) else rawMime,
+                kind=kind,size=if(cursor.isNull(2)) 0L else cursor.getLong(2),
+                modifiedAt=if(cursor.isNull(3)) 0L else cursor.getLong(3))
+        } ?: error("归档文件不可读")
+        val result=db.upsertBasic(record,0L)
+        if(result.metadataNeeded) enrichMetadata(listOf(MetadataTask(uri,record.kind,record.name,result.isNew)))
+        return db.recordById(result.id)?.takeIf { !it.hidden && it.trashedAt==0L }
+    }
+
     fun enrichMetadata(tasks: List<MetadataTask>, onProgress: (Int, Int) -> Unit = { _, _ -> }): MetadataResult {
         val resolver = context.contentResolver
         var errors = 0
         var newFileErrors = 0
         val failedNewUris = linkedSetOf<String>()
         tasks.forEachIndexed { index, task ->
+            // A transfer/deletion between metadata batches must not recreate a stale error row.
+            if (db.recordByUri(task.uri.toString()) == null) return@forEachIndexed
             try {
                 val meta = if (task.kind == MediaKind.VIDEO) videoMetadata(task.uri) else imageMetadata(resolver, task.uri)
                 db.updateMetadata(task.uri.toString(), meta.durationMs, meta.width, meta.height, meta.rotation)

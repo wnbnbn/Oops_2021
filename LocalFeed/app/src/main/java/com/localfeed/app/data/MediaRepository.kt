@@ -12,7 +12,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
+import com.localfeed.app.core.InboxWork
+import com.localfeed.app.core.InboxBatchQueue
 import kotlin.concurrent.withLock
 
 data class ScanSummary(
@@ -32,7 +35,15 @@ data class ScanSummary(
 data class DiagnosticSummary(val checked: Int, val issues: Int)
 private data class DiagnosticFinding(val stage: String, val message: String)
 
+data class InboxLibraryUpdate(val records: List<MediaRecord>, val removedIds: Set<Long>)
+
 class MediaRepository(private val context: Context) {
+    companion object {
+        private val inboxIo=Executors.newSingleThreadExecutor { r -> Thread(r,"media-inbox-io") }
+        private val inboxPublishTimer=Executors.newSingleThreadScheduledExecutor { r -> Thread(r,"media-inbox-publish") }
+    }
+    private val inboxArchives=InboxBatchQueue<InboxArchive>()
+    private val inboxPublishQueued=AtomicBoolean(false)
     private val db = MediaIndexDb(context)
     private val indexIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-index-io") }
     private val metadataIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-metadata-io") }
@@ -40,7 +51,7 @@ class MediaRepository(private val context: Context) {
     private val fileIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-file-io") }
     private val diagnosticIo = Executors.newSingleThreadExecutor { r -> Thread(r, "media-diagnostic-io") }
     private val generation = AtomicInteger(0)
-    private val storageLock = ReentrantLock(true)
+    private val storageLock = InboxWork.storageLock
     private val trashManager = TrashManager(context, db)
     private val duplicateScanner = DuplicateScanner(context, db)
 
@@ -136,12 +147,12 @@ class MediaRepository(private val context: Context) {
         onIndexed: (List<MediaRecord>, ScanSummary) -> Unit,
         onMetadataDone: (List<MediaRecord>, ScanSummary) -> Unit,
         onFailed: (String) -> Unit = {},
-        onInboxEvent: (InboxEvent) -> Unit = {}
+        onInboxEvent: (InboxEvent) -> Unit = {},
+        onInboxIndexed: (InboxLibraryUpdate) -> Unit = {}
     ) {
         val run = generation.incrementAndGet()
         indexIo.execute {
           try {
-            storageLock.withLock { DownloadInbox(context).scan(onInboxEvent, onProgress) }
             val configuredRoots = db.folderUris()
             val grantedRoots = context.contentResolver.persistedUriPermissions
                 .asSequence()
@@ -193,17 +204,23 @@ class MediaRepository(private val context: Context) {
             // The UI intentionally does not publish half-read rows. Avoid constructing the entire
             // gallery here; on a large database this duplicate snapshot also pressures CursorWindow.
             onIndexed(emptyList(), indexedSummary)
+            startInbox(onInboxEvent,onInboxIndexed)
 
             metadataIo.execute {
                 try {
                     if (run != generation.get()) return@execute
                     val scanner = TreeScanner(context, db)
-                    val (meta, visible) = storageLock.withLock {
-                        val result = scanner.enrichMetadata(allTasks) { done, total ->
-                            if (run == generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $done/$total")
-                        }
-                        result to db.allVisible()
+                    var errors=0; var newErrors=0; var processed=0
+                    val failed=linkedSetOf<String>()
+                    for (batch in allTasks.chunked(25)) {
+                        if (run != generation.get()) return@execute
+                        val result=storageLock.withLock { scanner.enrichMetadata(batch) }
+                        errors+=result.errors; newErrors+=result.newFileErrors; failed+=result.failedNewUris
+                        processed+=batch.size
+                        if(run==generation.get()) onProgress("媒体库已经可用 · 正在分析尺寸/时长 $processed/${allTasks.size}")
                     }
+                    val meta=TreeScanner.MetadataResult(errors,newErrors,failed)
+                    val visible=storageLock.withLock { db.allVisible() }
                     if (run == generation.get()) onMetadataDone(
                         visible,
                         indexedSummary.copy(
@@ -220,6 +237,62 @@ class MediaRepository(private val context: Context) {
               if (run == generation.get()) onFailed("媒体索引失败：${error.message ?: error.javaClass.simpleName}")
           }
         }
+    }
+
+    private fun startInbox(onEvent: (InboxEvent)->Unit,onIndexed: (InboxLibraryUpdate)->Unit) {
+        if(!InboxWork.begin()) return
+        inboxIo.execute {
+            try {
+                DownloadInbox(context).scan(
+                    onEvent=onEvent,
+                    withFileLock={ operation -> storageLock.withLock { operation() } },
+                    onSourceDeleted={ uri ->
+                        db.recordsForDocument(uri).mapTo(linkedSetOf()) { old ->
+                            db.deleteRecord(old.id); old.id
+                        }
+                    },
+                    onArchived={ archive ->
+                        inboxArchives.offer(archive.documentUri,archive)
+                        scheduleInboxPublication(onEvent,onIndexed)
+                    }
+                )
+            } catch(error: Throwable) {
+                onEvent(InboxEvent("inbox-worker","下载收件箱","",InboxStatus.FAILED,
+                    "转移任务异常："+(error.message ?: error.javaClass.simpleName)+"；已保存的转移记录下次扫描恢复"))
+            } finally { InboxWork.end() }
+        }
+    }
+
+    private fun scheduleInboxPublication(onEvent: (InboxEvent)->Unit,onIndexed: (InboxLibraryUpdate)->Unit) {
+        if(!inboxPublishQueued.compareAndSet(false,true)) return
+        inboxPublishTimer.schedule({
+            indexIo.execute {
+                val records=mutableListOf<MediaRecord>()
+                val removed=linkedSetOf<Long>()
+                try {
+                    val scanner=TreeScanner(context,db)
+                    for(archive in inboxArchives.drain(16)) {
+                        removed+=archive.removedSourceIds
+                        try {
+                            val record=storageLock.withLock {
+                                scanner.indexArchived(Uri.parse(archive.rootUri),Uri.parse(archive.documentUri))
+                            }
+                            if(record!=null) records+=record
+                            onEvent(InboxEvent("inbox-index:"+archive.documentUri,archive.name,archive.documentUri,
+                                InboxStatus.DONE,"归档文件已完成相册索引；播放中的队列不会被重建"))
+                        } catch(error: Throwable) {
+                            if(archive.attempt<2) inboxArchives.offer(archive.documentUri,archive.copy(attempt=archive.attempt+1))
+                            else onEvent(InboxEvent("inbox-index:"+archive.documentUri,archive.name,archive.documentUri,
+                                InboxStatus.FAILED,"归档文件已保留，但加入相册失败："+(error.message ?: error.javaClass.simpleName)+"；可重扫归档目录"))
+                        }
+                    }
+                    if(records.isNotEmpty() || removed.isNotEmpty()) onIndexed(InboxLibraryUpdate(records,removed))
+                } finally {
+                    inboxPublishQueued.set(false)
+                    if(!inboxArchives.isEmpty()) scheduleInboxPublication(onEvent,onIndexed)
+                }
+            }
+        },750,TimeUnit.MILLISECONDS)
     }
 
     fun scanDuplicates(onProgress: (String) -> Unit, onDone: (List<DuplicateGroup>) -> Unit) {

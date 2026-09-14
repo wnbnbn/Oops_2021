@@ -560,6 +560,23 @@ class MediaIndexDb(context: Context) : SQLiteOpenHelper(context, "local_feed.db"
         "SELECT $RECORD_COLUMNS FROM media WHERE uri=?", arrayOf(uri)
     ).use { c -> readAll(c).firstOrNull() }
 
+    /** Match the same SAF document under different persisted tree grants without a full snapshot. */
+    fun recordsForDocument(uri: String): List<MediaRecord> {
+        val parsed=android.net.Uri.parse(uri)
+        val id=runCatching { android.provider.DocumentsContract.getDocumentId(parsed) }.getOrNull()
+            ?: return listOfNotNull(recordByUri(uri))
+        val suffix="/document/"+android.net.Uri.encode(id)
+        val escaped=suffix.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")
+        return readableDatabase.rawQuery(
+            "SELECT $RECORD_COLUMNS FROM media WHERE uri LIKE ? ESCAPE '\\'",
+            arrayOf("%"+escaped)
+        ).use { readAll(it) }.filter { record ->
+            val candidate=android.net.Uri.parse(record.uri)
+            candidate.authority==parsed.authority &&
+                runCatching { android.provider.DocumentsContract.getDocumentId(candidate)==id }.getOrDefault(false)
+        }
+    }
+
     fun problems(): List<ProblemMedia> = readableDatabase.rawQuery(
         """
         SELECT e.uri,e.name,e.stage,e.message,e.updated_at

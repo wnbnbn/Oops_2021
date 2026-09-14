@@ -2,6 +2,11 @@ package com.localfeed.app.ui
 
 import android.app.AlertDialog
 import android.app.Dialog
+import android.content.Intent
+import android.content.ClipData
+import android.net.Uri
+import android.text.format.Formatter
+import com.localfeed.app.data.MediaPathUtils
 import android.os.Bundle
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -34,6 +39,7 @@ class CardHallActivity : AppCompatActivity() {
     private var saved = false
     private var epoch = 0
     private var duelVertical: Boolean? = null
+    private val previews=mutableSetOf<Dialog>()
     private val visibleImages = mutableListOf<ImageView>()
     private val prefs by lazy { getSharedPreferences("localfeed_card_games", MODE_PRIVATE) }
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -127,8 +133,9 @@ class CardHallActivity : AppCompatActivity() {
             } else image.setImageResource(android.R.drawable.ic_menu_report_image)
             slot.requestLayout()
         }
-        slot.setOnClickListener { action() }
-        slot.setOnLongClickListener { preview(record); true }
+        // Bind to the fitted card, not its weighted slot: empty space is not a vote.
+        frame.setOnClickListener { if(image.drawable!=null) action() }
+        frame.setOnLongClickListener { preview(record); true }
     }
     private fun preview(record: MediaRecord) {
         val image = ZoomImageView(this).apply { setBackgroundColor(Color.TRANSPARENT) }
@@ -145,15 +152,66 @@ class CardHallActivity : AppCompatActivity() {
         content.addView(close,FrameLayout.LayoutParams(dp(48),dp(48),Gravity.TOP or Gravity.END).apply {
             topMargin=dp(16); rightMargin=dp(16)
         })
+        val more=TextView(this).apply {
+            text="⋯"; textSize=30f; gravity=Gravity.CENTER; setTextColor(Color.WHITE)
+            contentDescription="图片更多操作"
+            background=GradientDrawable().apply { setColor(0x66000000); shape=GradientDrawable.OVAL }
+            setOnClickListener { previewActions(record) }
+        }
+        content.addView(more,FrameLayout.LayoutParams(dp(48),dp(48),Gravity.TOP or Gravity.START).apply {
+            topMargin=dp(16); leftMargin=dp(16)
+        })
         dialog.setContentView(content)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         }
+        previews+=dialog
         dialog.show(); dialog.window?.setLayout(-1,-1)
         thumbs.load(record,image,1600)
-        dialog.setOnDismissListener { thumbs.clear(image) }
+        dialog.setOnDismissListener { previews.remove(dialog); thumbs.clear(image) }
     }
+    private fun previewActions(record: MediaRecord) {
+        AlertDialog.Builder(this).setTitle("图片更多").setItems(
+            arrayOf("文件信息","分享","其他应用打开","移到最近删除","永久删除")
+        ) { _, which ->
+            when(which) {
+                0 -> {
+                    val date=java.text.DateFormat.getDateTimeInstance()
+                    AlertDialog.Builder(this).setTitle(record.name).setMessage(
+                        "目录："+MediaPathUtils.absoluteDirectoryPath(record)+
+                        "\n大小："+Formatter.formatFileSize(this,record.size)+
+                        "\n尺寸："+record.width+" × "+record.height+
+                        "\n修改时间："+date.format(java.util.Date(record.modifiedAt))+
+                        "\n点赞："+record.likeCount+"\n收藏："+(if(record.favorited) "是" else "否")
+                    ).setPositiveButton("关闭",null).show()
+                }
+                1,2 -> {
+                    val uri=Uri.parse(record.uri)
+                    val intent=if(which==1) Intent(Intent.ACTION_SEND).apply {
+                        type=record.mime; putExtra(Intent.EXTRA_STREAM,uri)
+                    } else Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,record.mime) }
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    intent.clipData=ClipData.newRawUri(record.name,uri)
+                    runCatching { startActivity(Intent.createChooser(intent,if(which==1) "分享图片" else "选择应用")) }
+                        .onFailure { Toast.makeText(this,"无法打开："+(it.message ?: "没有可用应用"),Toast.LENGTH_LONG).show() }
+                }
+                3,4 -> {
+                    val permanent=which==4
+                    AlertDialog.Builder(this).setTitle(if(permanent) "永久删除这张图片？" else "移到最近删除？")
+                        .setMessage(record.name+"\n\n"+
+                            (if(permanent) "永久删除无法恢复。" else "可以在最近删除中恢复。")+
+                            "\n操作会结束当前未完成对局并返回相册，由现有任务队列执行；不会计为选胜者，已完成战绩保留。")
+                        .setNegativeButton("取消",null).setPositiveButton("确认") { _, _ ->
+                            setResult(RESULT_OK,Intent().putExtra("card_delete_ids",longArrayOf(record.id))
+                                .putExtra("card_delete_permanent",permanent))
+                            finish()
+                        }.show()
+                }
+            }
+        }.show()
+    }
+
     private fun renderDuel() {
         panel(); val g = duel ?: return
         text(if (g.survival) "生存擂台" else "卡牌锦标赛", 24f)
@@ -272,5 +330,5 @@ class CardHallActivity : AppCompatActivity() {
         }
         button("回到大厅") { hall() }
     }
-    override fun onDestroy() { epoch++; thumbs.release(); io.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() { epoch++; previews.toList().forEach { it.dismiss() }; thumbs.release(); io.shutdownNow(); super.onDestroy() }
 }

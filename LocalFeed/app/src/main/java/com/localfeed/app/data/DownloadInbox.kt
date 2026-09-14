@@ -12,9 +12,15 @@ import java.util.UUID
 enum class InboxStatus { WAITING, RUNNING, DONE, FAILED, PARTIAL }
 data class InboxEvent(val key: String, val name: String, val uri: String, val status: InboxStatus, val detail: String)
 
+data class InboxArchive(
+    val rootUri: String, val documentUri: String, val sourceUri: String,
+    val sourceDeleted: Boolean, val name: String, val attempt: Int = 0,
+    val removedSourceIds: Set<Long> = emptySet()
+)
+
 data class InboxRule(val id: String, val source: String, val target: String, val enabled: Boolean = true)
 
-/** Scan-bound, single-worker inbox. Source deletion only follows a verified, durable copy. */
+/** Single-worker inbox. Source deletion only follows a verified, durable copy. */
 class DownloadInbox(private val context: Context) {
     private val prefs = context.getSharedPreferences("localfeed_inboxes", Context.MODE_PRIVATE)
     fun rules(): List<InboxRule> = runCatching {
@@ -64,7 +70,17 @@ class DownloadInbox(private val context: Context) {
             report(if(archiveReady && !sourceDeleted) InboxStatus.PARTIAL else InboxStatus.FAILED,causes)
         }
     }
-    fun scan(onEvent: (InboxEvent)->Unit, onProgress: (String)->Unit = {}) {
+    fun scan(
+        onEvent: (InboxEvent)->Unit,
+        onProgress: (String)->Unit = {},
+        withFileLock: (() -> Unit) -> Unit = { it() },
+        onArchived: (InboxArchive) -> Unit = {},
+        onSourceDeleted: (String) -> Set<Long> = { emptySet() }
+    ) {
+        // SharedPreferences.all copies the map; read once rather than once per media file.
+        val transfers = prefs.all.keys.filter { it.startsWith("transfer:") }.associateByTo(linkedMapOf()) {
+            documentKey(Uri.parse(it.removePrefix("transfer:").substringAfter('|')))
+        }
         rules().filter { it.enabled }.forEach { rule ->
             var directory=Trace(rule,"下载收件箱",rule.source,rule.source,rule.target,onEvent)
             try {
@@ -78,12 +94,32 @@ class DownloadInbox(private val context: Context) {
                 runCatching { if(target.findFile(".nomedia")==null) target.createFile("application/octet-stream",".nomedia") }
                 directory.step("读取来源目录")
                 var count=0
-                listChecked(source).forEach { file ->
+                for (file in listChecked(source)) {
+                    // Changes take effect at file boundaries; never abandon an in-flight copy.
+                    if (rules().none { it.id == rule.id && it.enabled && it.target == rule.target }) break
                     val trace=Trace(rule,file.name ?: "文件",file.uri.toString(),source.name ?: rule.source,target.name ?: rule.target,onEvent)
-                    try {
-                        trace.stage="读取文件属性"
-                        if(eligible(file)) { count++; onProgress("收件箱检查 · "+trace.name); transferWhenStable(file,target,trace) }
-                    } catch(e: Exception) { trace.failure(e) }
+                    var removedIds = emptySet<Long>()
+                    withFileLock {
+                        try {
+                            trace.stage="读取文件属性"
+                            if(eligible(file)) {
+                                count++; onProgress("收件箱检查 · "+trace.name)
+                                transferWhenStable(file,target,trace,transfers)
+                            }
+                        } catch(e: Exception) { trace.failure(e) }
+                        // Remove the exact source rows immediately while holding the file lock.
+                        // Delaying this lookup could delete a NEW download which reuses its URI.
+                        if (trace.sourceDeleted) {
+                            try { removedIds = onSourceDeleted(trace.uri) }
+                            catch(e: Exception) { trace.failure(e) }
+                        }
+                    }
+                    // Publication is outside the lock and happens for every verified archive,
+                    // including a partial success whose source could not be deleted.
+                    if (trace.archiveReady && trace.archiveUri.isNotBlank()) onArchived(
+                        InboxArchive(rule.target,trace.archiveUri,trace.uri,trace.sourceDeleted,trace.name,
+                            removedSourceIds=removedIds)
+                    )
                 }
                 directory.stage="目录检查完成"
                 directory.report(InboxStatus.DONE,"已检查 "+count+" 个候选文件；逐项状态见文件任务")
@@ -105,6 +141,10 @@ class DownloadInbox(private val context: Context) {
         } ?: error("文件无法读取")
         return hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
+
+    private fun documentKey(uri: Uri): String = runCatching {
+        uri.authority + "|" + DocumentsContract.getDocumentId(uri)
+    }.getOrDefault(uri.toString())
 
     private fun sameDocument(a: Uri,b: Uri): Boolean {
         if(a==b) return true
@@ -136,7 +176,7 @@ class DownloadInbox(private val context: Context) {
     }
     private fun ownedTemp(file: DocumentFile)=file.name?.let { it.startsWith(".localfeed-") && it.endsWith(".part") }==true
 
-    private fun transferWhenStable(file: DocumentFile,target: DocumentFile,trace: Trace) {
+    private fun transferWhenStable(file: DocumentFile,target: DocumentFile,trace: Trace,transfers: MutableMap<String,String>) {
         trace.step("检测文件是否稳定")
         val key=file.uri.toString()
         val signature=file.length().toString()+":"+file.lastModified()
@@ -147,35 +187,44 @@ class DownloadInbox(private val context: Context) {
         }
         if(now-prefs.getLong(seen,now)<30_000) { trace.report(InboxStatus.WAITING,"等待文件稳定，下一次扫描再次检查"); return }
         trace.step("恢复转移记录")
-        val journalKey=prefs.all.keys.firstOrNull { saved ->
-            saved.startsWith("transfer:") && sameDocument(Uri.parse(saved.removePrefix("transfer:").substringAfter('|')),file.uri)
-        } ?: ("transfer:"+trace.rule.id+"|"+key)
+        val journalKey=transfers.getOrPut(documentKey(file.uri)) { "transfer:"+trace.rule.id+"|"+key }
         var journal=prefs.getString(journalKey,null)?.let { JSONObject(it) }
         if(journal!=null) {
             trace.archiveUri=journal.optString("uri")
             check(journal.optString("signature")==signature) { "来源文件已变化，保留来源与已有副本，请手动检查" }
         }
         val name=file.name ?: error("缺少文件名")
-        trace.step("读取来源并计算校验值")
-        val sourceHash=digest(file.uri)
+        var sourceHash = ""
+        // Existing verified hashes retain their strict source-change protection.
+        // Fresh copies calculate SHA-256 during the copy, eliminating one full source read.
+        if (journal?.optString("hash")?.isNotBlank() == true) {
+            trace.step("读取来源并计算校验值")
+            sourceHash=digest(file.uri)
+            check(journal.optString("hash")==sourceHash) { "来源内容已变化，停止转移并保留来源" }
+        }
+        var created: DocumentFile? = null
         if(journal==null) {
             trace.step("创建临时副本")
             val temp=target.createFile("application/octet-stream",".localfeed-"+UUID.randomUUID()+".part") ?: error("无法创建归档文件，检查空间与目录授权")
+            created=temp
             journal=JSONObject().put("signature",signature).put("uri",temp.uri.toString()).put("hash",sourceHash).put("ready",false)
                 .put("target",trace.rule.target)
             trace.archiveUri=temp.uri.toString()
             if(!prefs.edit().putString(journalKey,journal.toString()).commit()) { temp.delete(); error("转移记录保存失败") }
         }
         val state=requireNotNull(journal)
-        check(state.getString("hash")==sourceHash) { "来源内容已变化，停止转移并保留来源" }
         trace.step("恢复归档副本")
         // Legacy records have no target: their saved URI retains the old tree grant.
         val oldTarget=state.optString("target",state.getString("uri"))
         val changed=!sameTree(oldTarget,trace.rule.target)
         val oldParent=if(changed) DocumentFile.fromTreeUri(context,Uri.parse(oldTarget))
             ?: error("旧归档目录不可用，请重新授权旧目录；保留来源") else target
-        var candidate=copyIn(oldParent,state)
+        var candidate=created ?: copyIn(oldParent,state)
         if(candidate!=null && !ownedTemp(candidate)) {
+            if (sourceHash.isBlank()) {
+                sourceHash=digest(file.uri)
+                state.put("hash",sourceHash)
+            }
             check(candidate.length()==file.length() && digest(candidate.uri)==sourceHash) { "恢复副本校验失败，保留来源与副本" }
             state.put("uri",candidate.uri.toString()).put("ready",true)
         }
@@ -203,18 +252,32 @@ class DownloadInbox(private val context: Context) {
         if(!state.optBoolean("ready")) {
             // Reuse and verify an existing complete temporary copy rather than copying again.
             trace.step("检查已有临时副本")
-            val complete=archive.length()==file.length() && digest(archive.uri)==sourceHash
+            val complete=sourceHash.isNotBlank() && archive.length()==file.length() && digest(archive.uri)==sourceHash
             if(!complete) {
                 trace.step("复制文件内容")
+                val hash=MessageDigest.getInstance("SHA-256")
                 context.contentResolver.openInputStream(file.uri)?.use { input ->
-                    context.contentResolver.openOutputStream(archive.uri,"wt")?.use { output -> input.copyTo(output,256*1024) } ?: error("归档文件不可写")
+                    context.contentResolver.openOutputStream(archive.uri,"wt")?.use { output ->
+                        val buffer=ByteArray(256*1024)
+                        while(true) {
+                            val n=input.read(buffer)
+                            if(n<0) break
+                            output.write(buffer,0,n); hash.update(buffer,0,n)
+                        }
+                    } ?: error("归档文件不可写")
                 } ?: error("来源文件不可读")
+                val copiedHash=hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+                check(sourceHash.isBlank() || sourceHash==copiedHash) { "来源内容已变化，停止转移并保留来源" }
+                sourceHash=copiedHash
+                state.put("hash",sourceHash)
+                check(prefs.edit().putString(journalKey,state.toString()).commit()) { "复制校验记录保存失败；保留来源" }
             }
             trace.step("校验临时副本")
             check(archive.length()==file.length() && digest(archive.uri)==sourceHash) { "归档长度或校验值不符，保留来源" }
+            val siblings=listChecked(target)
             var finalName=state.optString("finalName")
             if(finalName.isBlank()) {
-                finalName=if(target.findFile(name)==null) name else {
+                finalName=if(siblings.none { it.name==name }) name else {
                     val dot=name.lastIndexOf('.')
                     if(dot>0) name.substring(0,dot)+"-"+UUID.randomUUID().toString().take(8)+name.substring(dot)
                     else name+"-"+UUID.randomUUID().toString().take(8)
@@ -223,7 +286,7 @@ class DownloadInbox(private val context: Context) {
                 check(prefs.edit().putString(journalKey,state.toString()).commit()) { "重命名意图保存失败" }
             }
             trace.step("重命名归档副本")
-            val namesake=target.findFile(finalName)
+            val namesake=siblings.firstOrNull { it.name==finalName }
             check(namesake==null || namesake.uri==archive.uri) { "归档文件名已被其他文件占用；保留来源和副本，不覆盖" }
             if(archive.name!=finalName) check(archive.renameTo(finalName)) { "文件提供器拒绝重命名；保留来源与已复制副本" }
             state.put("uri",archive.uri.toString()).put("ready",true)

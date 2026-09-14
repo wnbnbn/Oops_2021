@@ -93,10 +93,49 @@ fun main() {
     check(m.nodes.values.count { it.name=="image.jpg" }==1)
     check(m.nodes.values.none { it.name.startsWith(".localfeed-") })
     // A changed source must never overwrite a journaled copy or be deleted.
-    val (n,changed)=fixture(); changed.scan({}); stable(n); n.contentResolver.failWrite=true; changed.scan({})
-    n.contentResolver.failWrite=false; n.nodes["content://files/tree/Pictures/Inbox/image"]!!.bytes="other bytes".toByteArray()
+    val (n,changed)=fixture(); changed.scan({}); stable(n); n.denyRename=true; changed.scan({})
+    n.denyRename=false; n.nodes["content://files/tree/Pictures/Inbox/image"]!!.bytes="other bytes".toByteArray()
     val changedEvents=mutableListOf<InboxEvent>(); changed.scan({changedEvents+=it})
     check(changedEvents.any { it.status==InboxStatus.FAILED && it.detail.contains("来源内容已变化") })
     check(n.nodes.containsKey("content://files/tree/Pictures/Inbox/image"))
+    // Every verified file publishes outside its lock, before later files are copied.
+    val (bulk,batch)=fixture()
+    val source="content://files/tree/Pictures/Inbox"
+    bulk.nodes[source+"/second"]=Node("second.jpg",bytes="second bytes".toByteArray())
+    bulk.nodes[source]!!.children+=source+"/second"
+    batch.scan({}); stable(bulk)
+    var locked=false; var boundaries=0
+    val archives=mutableListOf<InboxArchive>()
+    batch.scan(onEvent={},withFileLock={ operation ->
+        check(!locked); locked=true; boundaries++
+        try { operation() } finally { locked=false }
+    },onSourceDeleted={ uri ->
+        check(locked && !bulk.nodes.containsKey(uri))
+        setOf(41L)
+    },onArchived={ archive ->
+        check(!locked && archive.sourceDeleted && archive.removedSourceIds==setOf(41L))
+        if(archives.isEmpty()) check(bulk.nodes.containsKey(source+"/second"))
+        archives+=archive
+    })
+    check(boundaries==2 && archives.size==2)
+    check(archives.map { it.name }==listOf("image.jpg","second.jpg"))
+    check(bulk.contentResolver.inputReads[source+"/image"]==2) // Copy + final source recheck.
+    check(bulk.contentResolver.inputReads[source+"/second"]==2)
+    check(bulk.contentResolver.openCursors==0)
+    // A verified archive remains discoverable even when deletion of the source fails.
+    val (partial,partialInbox)=fixture(); partialInbox.scan({}); stable(partial); partial.denyDelete=true
+    val partialArchives=mutableListOf<InboxArchive>()
+    partialInbox.scan(onEvent={},onArchived={partialArchives+=it})
+    check(partialArchives.size==1 && !partialArchives.single().sourceDeleted)
+    check(partial.nodes.containsKey(source+"/image"))
+    // Pause takes effect after the current file, with no abandoned partial copy.
+    val (pause,pauseInbox)=fixture()
+    pause.nodes[source+"/second"]=Node("second.jpg",bytes="second bytes".toByteArray())
+    pause.nodes[source]!!.children+=source+"/second"
+    pauseInbox.scan({}); stable(pause)
+    var published=0
+    pauseInbox.scan(onEvent={},onArchived={ published++; pauseInbox.toggle(pauseInbox.rules().single().id) })
+    check(published==1 && pause.nodes.containsKey(source+"/second"))
+    check(pause.nodes.values.none { it.name.startsWith(".localfeed-") })
     println("Download inbox state-machine regression (stub provider): PASS")
 }
