@@ -2,6 +2,7 @@ package com.localfeed.app.data
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
@@ -72,12 +73,12 @@ class DownloadInbox(private val context: Context) {
                 val target=DocumentFile.fromTreeUri(context,Uri.parse(rule.target)) ?: error("归档目录不可用")
                 directory=Trace(rule,"下载收件箱",rule.source,source.name ?: rule.source,target.name ?: rule.target,onEvent)
                 check(source.canRead()) { "来源目录不可读，请重新授权来源目录" }
-                check(target.canWrite()) { "归档目录不可写，请重新授权归档目录" }
+                check(target.canRead() && target.canWrite()) { "归档目录不可读写，请重新授权归档目录" }
                 // Failure to recreate a marker must not prevent valid transfers.
                 runCatching { if(target.findFile(".nomedia")==null) target.createFile("application/octet-stream",".nomedia") }
                 directory.step("读取来源目录")
                 var count=0
-                source.listFiles().forEach { file ->
+                listChecked(source).forEach { file ->
                     val trace=Trace(rule,file.name ?: "文件",file.uri.toString(),source.name ?: rule.source,target.name ?: rule.target,onEvent)
                     try {
                         trace.stage="读取文件属性"
@@ -105,6 +106,36 @@ class DownloadInbox(private val context: Context) {
         return hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
 
+    private fun sameDocument(a: Uri,b: Uri): Boolean {
+        if(a==b) return true
+        if(a.authority!=b.authority) return false
+        return runCatching { DocumentsContract.getDocumentId(a)==DocumentsContract.getDocumentId(b) }.getOrDefault(false)
+    }
+    private fun sameTree(a: String,b: String): Boolean {
+        val x=Uri.parse(a); val y=Uri.parse(b)
+        return x.authority==y.authority && DocumentsContract.getTreeDocumentId(x)==DocumentsContract.getTreeDocumentId(y)
+    }
+    // DocumentFile.listFiles can turn provider exceptions into an empty/partial list.
+    // Verify an explicit query before treating a recorded copy as missing.
+    private fun listChecked(parent: DocumentFile): Array<DocumentFile> {
+        check(parent.canRead()) { "目录不可读，请重新授权；保留来源与转移记录" }
+        val query=DocumentsContract.buildChildDocumentsUriUsingTree(parent.uri,DocumentsContract.getDocumentId(parent.uri))
+        val ids=mutableSetOf<String>()
+        context.contentResolver.query(query,arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),null,null,null)?.use { cursor ->
+            while(cursor.moveToNext()) ids+=cursor.getString(0)
+        } ?: error("文件提供器未返回目录列表，请稍后重试或重新授权")
+        val files=parent.listFiles()
+        check(files.map { DocumentsContract.getDocumentId(it.uri) }.toSet()==ids) { "目录读取不完整或仍在变化，下次扫描重试；保留来源" }
+        return files
+    }
+    private fun copyIn(parent: DocumentFile,state: JSONObject): DocumentFile? {
+        val files=listChecked(parent)
+        files.firstOrNull { sameDocument(it.uri,Uri.parse(state.getString("uri"))) }?.let { return it }
+        val finalName=state.optString("finalName")
+        return if(finalName.isBlank()) null else files.firstOrNull { it.name==finalName }
+    }
+    private fun ownedTemp(file: DocumentFile)=file.name?.let { it.startsWith(".localfeed-") && it.endsWith(".part") }==true
+
     private fun transferWhenStable(file: DocumentFile,target: DocumentFile,trace: Trace) {
         trace.step("检测文件是否稳定")
         val key=file.uri.toString()
@@ -116,7 +147,9 @@ class DownloadInbox(private val context: Context) {
         }
         if(now-prefs.getLong(seen,now)<30_000) { trace.report(InboxStatus.WAITING,"等待文件稳定，下一次扫描再次检查"); return }
         trace.step("恢复转移记录")
-        val journalKey="transfer:"+key
+        val journalKey=prefs.all.keys.firstOrNull { saved ->
+            saved.startsWith("transfer:") && sameDocument(Uri.parse(saved.removePrefix("transfer:").substringAfter('|')),file.uri)
+        } ?: ("transfer:"+trace.rule.id+"|"+key)
         var journal=prefs.getString(journalKey,null)?.let { JSONObject(it) }
         if(journal!=null) {
             trace.archiveUri=journal.optString("uri")
@@ -129,24 +162,43 @@ class DownloadInbox(private val context: Context) {
             trace.step("创建临时副本")
             val temp=target.createFile("application/octet-stream",".localfeed-"+UUID.randomUUID()+".part") ?: error("无法创建归档文件，检查空间与目录授权")
             journal=JSONObject().put("signature",signature).put("uri",temp.uri.toString()).put("hash",sourceHash).put("ready",false)
+                .put("target",trace.rule.target)
             trace.archiveUri=temp.uri.toString()
             if(!prefs.edit().putString(journalKey,journal.toString()).commit()) { temp.delete(); error("转移记录保存失败") }
         }
         val state=requireNotNull(journal)
         check(state.getString("hash")==sourceHash) { "来源内容已变化，停止转移并保留来源" }
         trace.step("恢复归档副本")
-        // Obtain a TreeDocumentFile from the chosen parent; fromSingleUri cannot rename.
-        var candidate=target.listFiles().firstOrNull { it.uri.toString()==state.getString("uri") }
-        if(candidate==null && state.has("finalName")) {
-            val renamed=target.findFile(state.getString("finalName"))
-            if(renamed!=null) {
-                check(renamed.length()==file.length() && digest(renamed.uri)==sourceHash) { "恢复副本校验失败" }
-                candidate=renamed
-                state.put("uri",renamed.uri.toString()).put("ready",true)
-                check(prefs.edit().putString(journalKey,state.toString()).commit()) { "恢复记录保存失败" }
-            }
+        // Legacy records have no target: their saved URI retains the old tree grant.
+        val oldTarget=state.optString("target",state.getString("uri"))
+        val changed=!sameTree(oldTarget,trace.rule.target)
+        val oldParent=if(changed) DocumentFile.fromTreeUri(context,Uri.parse(oldTarget))
+            ?: error("旧归档目录不可用，请重新授权旧目录；保留来源") else target
+        var candidate=copyIn(oldParent,state)
+        if(candidate!=null && !ownedTemp(candidate)) {
+            check(candidate.length()==file.length() && digest(candidate.uri)==sourceHash) { "恢复副本校验失败，保留来源与副本" }
+            state.put("uri",candidate.uri.toString()).put("ready",true)
         }
-        val archive=candidate ?: error("归档副本不可用；保留来源，不新建重复副本")
+        if(changed) {
+            trace.step("迁移旧归档记录")
+            check(state.optString("previousUri").isBlank()) { "上一次目录迁移尚未完成；请先选回上一次归档目录完成恢复，再更换目录" }
+            check(!state.optBoolean("ready")) { "旧目录已有正式归档文件；请将归档目录重新选回旧目录完成转移，或手动整理；保留来源，不创建重复文件" }
+            check(candidate==null || ownedTemp(candidate)) { "旧副本不是本应用临时文件，保留来源与副本" }
+        }
+        if(changed || candidate==null) {
+            check(!state.optBoolean("ready")) { "已归档文件不在目录列表中，可能已被移动或删除；保留来源，请检查旧副本" }
+            trace.step(if(changed) "在当前归档目录恢复转移" else "重建已确认缺失的临时副本")
+            // Keep the previous temporary copy until the replacement passes full verification.
+            if(candidate!=null) state.put("previousUri",candidate.uri.toString()).put("previousTarget",oldTarget)
+            val temp=target.createFile("application/octet-stream",".localfeed-"+UUID.randomUUID()+".part")
+                ?: error("无法创建归档临时文件，检查空间与授权；保留来源")
+            state.put("uri",temp.uri.toString()).put("target",trace.rule.target).put("ready",false).put("finalName","")
+            if(!prefs.edit().putString(journalKey,state.toString()).commit()) { temp.delete(); error("恢复记录保存失败；保留来源") }
+            candidate=temp
+        }
+        val archive=requireNotNull(candidate)
+        state.put("uri",archive.uri.toString()).put("target",trace.rule.target)
+        check(prefs.edit().putString(journalKey,state.toString()).commit()) { "恢复记录保存失败；保留来源" }
         trace.archiveUri=archive.uri.toString()
         if(!state.optBoolean("ready")) {
             // Reuse and verify an existing complete temporary copy rather than copying again.
@@ -182,6 +234,19 @@ class DownloadInbox(private val context: Context) {
         check(file.length().toString()+":"+file.lastModified()==signature && digest(file.uri)==sourceHash) { "来源文件仍在写入，暂不删除" }
         check(archive.length()==file.length() && digest(archive.uri)==sourceHash) { "归档复核失败，暂不删除" }
         trace.archiveReady=true
+        val previous=state.optString("previousUri")
+        if(previous.isNotBlank()) {
+            trace.step("清理已替换的旧临时副本")
+            val parent=DocumentFile.fromTreeUri(context,Uri.parse(state.getString("previousTarget")))
+                ?: error("新副本已校验，但旧临时目录不可用；请重新授权旧目录后重试")
+            val old=listChecked(parent).firstOrNull { sameDocument(it.uri,Uri.parse(previous)) }
+            if(old!=null) {
+                check(ownedTemp(old) && !sameDocument(old.uri,archive.uri)) { "旧副本状态改变，停止清理；保留来源" }
+                check(old.delete()) { "新副本已校验，但旧临时副本清理失败；保留来源，下次重试" }
+            }
+            state.put("previousUri","").put("previousTarget","")
+            check(prefs.edit().putString(journalKey,state.toString()).commit()) { "旧副本清理记录保存失败；保留来源" }
+        }
         trace.step("删除来源文件")
         check(file.delete()) { "已归档，但来源删除失败；下次扫描只重试删除，不重复复制" }
         trace.sourceDeleted=true

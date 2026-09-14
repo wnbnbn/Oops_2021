@@ -1,10 +1,15 @@
 package com.localfeed.app.ui
 
 import android.app.AlertDialog
+import android.app.Dialog
 import android.os.Bundle
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
+import android.view.View
+import android.view.Window
+import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.localfeed.app.core.*
@@ -98,13 +103,14 @@ class CardHallActivity : AppCompatActivity() {
             background=CardTier.frame(record.likeCount,resources.displayMetrics.density)
         }
         val slot=object : FrameLayout(this) {
-            fun fitFrame() {
-                if(width<=0 || height<=0) return
-                val size=CardGeometry.fit((width-dp(12)).coerceAtLeast(1),(height-dp(12)).coerceAtLeast(1),aspect)
-                frame.layoutParams=FrameLayout.LayoutParams(size.first+dp(6),size.second+dp(6),Gravity.CENTER)
-            }
-            override fun onSizeChanged(w: Int,h: Int,oldw: Int,oldh: Int) {
-                super.onSizeChanged(w,h,oldw,oldh); fitFrame()
+            override fun onMeasure(widthMeasureSpec: Int,heightMeasureSpec: Int) {
+                // Fit before measuring the children, including cached-image and weight passes.
+                val w=View.MeasureSpec.getSize(widthMeasureSpec)
+                val h=View.MeasureSpec.getSize(heightMeasureSpec)
+                val size=CardGeometry.fit((w-dp(12)).coerceAtLeast(1),(h-dp(12)).coerceAtLeast(1),aspect)
+                val params=frame.layoutParams as FrameLayout.LayoutParams
+                params.width=size.first+dp(6); params.height=size.second+dp(6)
+                super.onMeasure(widthMeasureSpec,heightMeasureSpec)
             }
         }.apply { setBackgroundColor(Color.TRANSPARENT) }
         val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.TRANSPARENT) }
@@ -119,15 +125,33 @@ class CardHallActivity : AppCompatActivity() {
                 if(drawable!=null && drawable.intrinsicWidth>0 && drawable.intrinsicHeight>0)
                     aspect=drawable.intrinsicWidth.toFloat()/drawable.intrinsicHeight
             } else image.setImageResource(android.R.drawable.ic_menu_report_image)
-            slot.fitFrame()
+            slot.requestLayout()
         }
         slot.setOnClickListener { action() }
         slot.setOnLongClickListener { preview(record); true }
     }
     private fun preview(record: MediaRecord) {
-        val image = ZoomImageView(this).apply { setBackgroundColor(Color.rgb(17,19,27)) }
-        val dialog = AlertDialog.Builder(this).setView(image).setPositiveButton("关闭", null).create()
-        dialog.show(); dialog.window?.setLayout(-1, dp(560)); thumbs.load(record,image,1600)
+        val image = ZoomImageView(this).apply { setBackgroundColor(Color.TRANSPARENT) }
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val content=FrameLayout(this).apply { setBackgroundColor(Color.rgb(17,19,27)) }
+        content.addView(image,FrameLayout.LayoutParams(-1,-1))
+        val close=TextView(this).apply {
+            text="×"; textSize=30f; gravity=Gravity.CENTER; setTextColor(Color.WHITE)
+            contentDescription="关闭预览"
+            background=GradientDrawable().apply { setColor(0x66000000); shape=GradientDrawable.OVAL }
+            setOnClickListener { dialog.dismiss() }
+        }
+        content.addView(close,FrameLayout.LayoutParams(dp(48),dp(48),Gravity.TOP or Gravity.END).apply {
+            topMargin=dp(16); rightMargin=dp(16)
+        })
+        dialog.setContentView(content)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
+        dialog.show(); dialog.window?.setLayout(-1,-1)
+        thumbs.load(record,image,1600)
         dialog.setOnDismissListener { thumbs.clear(image) }
     }
     private fun renderDuel() {
@@ -158,10 +182,17 @@ class CardHallActivity : AppCompatActivity() {
         row.orientation=if(duelVertical==true) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         card(pair.first,row) { g.choose(pair.first); renderDuel() }
         card(pair.second,row) { g.choose(pair.second); renderDuel() }
-        button(if(duelVertical==true) "▥  切换左右布局" else "▤  切换上下布局") {
+        val layoutButton=button(if(duelVertical==true) "▥  切换左右布局" else "▤  切换上下布局") {}
+        layoutButton.setOnClickListener {
             duelVertical=duelVertical!=true
             prefs.edit().putString("duel_layout",if(duelVertical==true) "vertical" else "horizontal").apply()
-            renderDuel()
+            row.orientation=if(duelVertical==true) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            for(i in 0 until row.childCount) {
+                row.getChildAt(i).layoutParams=if(duelVertical==true) LinearLayout.LayoutParams(-1,0,1f)
+                    else LinearLayout.LayoutParams(0,-1,1f)
+            }
+            layoutButton.text=if(duelVertical==true) "▥  切换左右布局" else "▤  切换上下布局"
+            row.requestLayout()
         }
         button("结束并返回") {
             if (g.survival && g.history.isNotEmpty() && !saved) { saveDuel(g); saved = true }; hall()

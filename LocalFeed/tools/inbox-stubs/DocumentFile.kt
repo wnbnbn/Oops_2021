@@ -15,7 +15,7 @@ class DocumentFile(val context:Context,val uri:Uri,val single:Boolean=false) {
     fun findFile(name:String)=listFiles().firstOrNull { it.name==name }
     fun createFile(mime:String,name:String):DocumentFile? {
         if(!canWrite()) return null
-        val child=uri.toString()+"/"+java.util.UUID.randomUUID()
+        val child=uri.toString().substringBefore("/document/")+"/document/"+java.util.UUID.randomUUID()
         context.nodes[child]=Node(name); node!!.children+=child
         return DocumentFile(context,Uri.parse(child))
     }
@@ -31,7 +31,10 @@ class DocumentFile(val context:Context,val uri:Uri,val single:Boolean=false) {
         return true
     }
     companion object {
-        fun fromTreeUri(c:Context,u:Uri):DocumentFile?=if(c.nodes.containsKey(u.toString())) DocumentFile(c,u) else null
+        fun fromTreeUri(c:Context,u:Uri):DocumentFile? {
+            val root=Uri.parse(u.toString().substringBefore("/document/"))
+            return if(c.nodes.containsKey(root.toString())) DocumentFile(c,root) else null
+        }
         fun fromSingleUri(c:Context,u:Uri)=DocumentFile(c,u,true)
     }
 }

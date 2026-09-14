@@ -14,6 +14,7 @@ class JSONObject {
     fun optString(k:String,d:String="")=data[k] as? String ?: d
     fun optBoolean(k:String,d:Boolean=false)=data[k] as? Boolean ?: d
     fun has(k:String)=data.containsKey(k)
+    fun remove(k:String)=data.remove(k)
     override fun toString():String { val id=Tokens.id(); Tokens.objects[id]=data.toMap(); return id }
 }
 class JSONArray {

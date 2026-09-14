@@ -4,3 +4,4 @@ data class Uri(val value:String) {
     val authority get()=value.substringAfter("://").substringBefore('/')
     override fun toString()=value
 }
+

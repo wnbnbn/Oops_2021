@@ -3,6 +3,7 @@ import android.net.Uri
 import java.io.*
 class SharedPreferences {
     val values=mutableMapOf<String,Any>()
+    val all get()=values.toMap()
     fun getString(k:String,d:String?):String?=values[k] as? String ?: d
     fun getLong(k:String,d:Long):Long=values[k] as? Long ?: d
     fun edit()=Editor(this)
@@ -19,6 +20,13 @@ class Node(var name:String,val directory:Boolean=false,var bytes:ByteArray=byteA
 }
 class ContentResolver(val c:Context) {
     var failWrite=false
+    var failList=false
+    fun query(uri:Uri,projection:Array<String>,selection:String?,args:Array<String>?,sort:String?):Cursor? {
+        if(failList) throw SecurityException("directory denied")
+        val node=c.nodes[uri.toString().removeSuffix("/children")] ?: throw java.io.FileNotFoundException("directory missing")
+        if(!node.readable) throw SecurityException("directory denied")
+        return Cursor(node.children.map { android.provider.DocumentsContract.getDocumentId(Uri.parse(it)) })
+    }
     fun openInputStream(uri:Uri):InputStream? {
         val n=c.nodes[uri.toString()] ?: return null
         if(!n.readable) throw SecurityException("read denied")
@@ -29,6 +37,12 @@ class ContentResolver(val c:Context) {
         val n=c.nodes[uri.toString()] ?: return null
         return object:ByteArrayOutputStream() { override fun close() { super.close(); n.bytes=toByteArray() } }
     }
+}
+class Cursor(val ids:List<String>):java.io.Closeable {
+    var index=-1
+    fun moveToNext():Boolean { index++; return index<ids.size }
+    fun getString(column:Int)=ids[index]
+    override fun close() {}
 }
 class Context {
     companion object { const val MODE_PRIVATE=0 }
