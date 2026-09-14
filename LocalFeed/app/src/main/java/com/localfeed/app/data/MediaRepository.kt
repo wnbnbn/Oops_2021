@@ -141,7 +141,7 @@ class MediaRepository(private val context: Context) {
         val run = generation.incrementAndGet()
         indexIo.execute {
           try {
-            storageLock.withLock { DownloadInbox(context).scan(onInboxFile) }
+            storageLock.withLock { DownloadInbox(context).scan(onInboxFile, onProgress) }
             val configuredRoots = db.folderUris()
             val grantedRoots = context.contentResolver.persistedUriPermissions
                 .asSequence()

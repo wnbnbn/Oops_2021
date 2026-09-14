@@ -37,7 +37,7 @@ class DownloadInbox(private val context: Context) {
     }
     fun toggle(id: String) = store(rules().map { if(it.id==id) it.copy(enabled=!it.enabled) else it })
     fun remove(id: String) = store(rules().filterNot { it.id==id })
-    fun scan(onFile: (String,String,String,Boolean) -> Unit) {
+    fun scan(onFile: (String,String,String,Boolean) -> Unit, onProgress: (String) -> Unit = {}) {
         rules().filter { it.enabled }.forEach { rule ->
             try {
                 val source=DocumentFile.fromTreeUri(context,Uri.parse(rule.source)) ?: error("来源目录不可用")
@@ -46,6 +46,7 @@ class DownloadInbox(private val context: Context) {
                 // Keep archive private from the system gallery; SAF scanning is unaffected.
                 if(target.findFile(".nomedia")==null) target.createFile("application/octet-stream",".nomedia")
                 source.listFiles().filter { eligible(it) }.forEach { file ->
+                    onProgress("收件箱检查 · ${file.name ?: "文件"}")
                     try { transferWhenStable(file,target,onFile) }
                     catch(e: Exception) { onFile(file.name ?: "文件",file.uri.toString(),e.message ?: "转移失败",false) }
                 }
@@ -81,7 +82,7 @@ class DownloadInbox(private val context: Context) {
         val sourceHash=digest(file.uri)
         if(journal==null) {
             // Never overwrite a namesake. The UUID temporary filename survives interrupted copies.
-            val temp=target.createFile(file.type ?: "application/octet-stream",".localfeed-${UUID.randomUUID()}.part") ?: error("无法创建归档文件")
+            val temp=target.createFile("application/octet-stream",".localfeed-${UUID.randomUUID()}.part") ?: error("无法创建归档文件")
             journal=JSONObject().put("signature",signature).put("uri",temp.uri.toString()).put("hash",sourceHash).put("ready",false)
             if(!prefs.edit().putString(journalKey,journal.toString()).commit()) { temp.delete(); error("转移记录保存失败") }
         }

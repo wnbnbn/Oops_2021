@@ -20,12 +20,15 @@ class CardHallActivity : AppCompatActivity() {
     private lateinit var thumbs: ThumbnailLoader
     private val io = Executors.newSingleThreadExecutor()
     private var all = emptyList<MediaRecord>()
+    private var byId = emptyMap<Long,MediaRecord>()
+    private var folderNames = emptyMap<String,String>()
     private var source = emptyList<MediaRecord>()
     private var duel: CardDuel? = null
     private var memory: MemoryPairs? = null
     private var started = 0L
     private var saved = false
     private var epoch = 0
+    private val visibleImages = mutableListOf<ImageView>()
     private val prefs by lazy { getSharedPreferences("localfeed_card_games", MODE_PRIVATE) }
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     override fun onCreate(state: Bundle?) {
@@ -38,11 +41,15 @@ class CardHallActivity : AppCompatActivity() {
         setContentView(root)
         text("正在准备卡牌…", 20f)
         io.execute {
-            val items = MediaRepository(applicationContext).allMedia().filter { it.kind == MediaKind.IMAGE }
-            runOnUiThread { if (!isDestroyed) { all = items; source = items; hall() } }
+            val repository = MediaRepository(applicationContext)
+            val items = repository.allMedia().filter { it.kind == MediaKind.IMAGE }
+            val names = repository.folderInfos().associate { it.rootUri to it.displayName }
+            runOnUiThread { if (!isDestroyed && !isFinishing) { all = items; byId = items.associateBy { it.id }; folderNames=names; source = items; hall() } }
         }
     }
-    private fun panel() { epoch++; root.removeAllViews() }
+    private fun panel() {
+        epoch++; visibleImages.forEach { thumbs.clear(it) }; visibleImages.clear(); root.removeAllViews()
+    }
     private fun text(value: String, size: Float = 15f): TextView = TextView(this).apply {
         text = value; textSize = size; setTextColor(Color.rgb(235,232,223)); setPadding(0,dp(8),0,dp(8))
         root.addView(this)
@@ -59,7 +66,7 @@ class CardHallActivity : AppCompatActivity() {
         text("${source.size} 张图片 · 对局成绩独立记录")
         button("选择图片来源") {
             val folders = all.map { it.rootUri }.distinct()
-            val labels = listOf("全部图片", "收藏图片") + folders.map { uri -> all.first { it.rootUri == uri }.relativePath.substringBefore('/').ifBlank { "目录 ${folders.indexOf(uri)+1}" } }
+            val labels = listOf("全部图片", "收藏图片") + folders.map { uri -> folderNames[uri] ?: "媒体目录" }
             AlertDialog.Builder(this).setTitle("图片来源").setItems(labels.toTypedArray()) { _, i ->
                 source = when(i) { 0 -> all; 1 -> all.filter { it.favorited }; else -> all.filter { it.rootUri == folders[i-2] } }; hall()
             }.show()
@@ -82,11 +89,12 @@ class CardHallActivity : AppCompatActivity() {
         started = System.currentTimeMillis(); saved = false; renderDuel()
     }
     private fun card(id: Long, parent: LinearLayout, action: () -> Unit) {
-        val record = all.firstOrNull { it.id == id } ?: return
+        val record = byId[id] ?: return
         val frame = FrameLayout(this).apply {
             setPadding(dp(6),dp(6),dp(6),dp(6)); background = CardTier.frame(record.likeCount, resources.displayMetrics.density)
         }
         val image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        visibleImages += image
         frame.addView(image, FrameLayout.LayoutParams(-1,-1))
         parent.addView(frame, LinearLayout.LayoutParams(0,-1,1f).apply { setMargins(dp(3),dp(3),dp(3),dp(3)) })
         thumbs.load(record, image, 720) { ok -> if (!ok) image.setImageResource(android.R.drawable.ic_menu_report_image) }
@@ -178,8 +186,13 @@ class CardHallActivity : AppCompatActivity() {
             val c=item.optLong("champion",-1); if(c>=0) crowns[c]=(crowns[c]?:0)+1
             val b=Button(this).apply { text="${item.getString("mode")} · ${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.getLong("time")))}"; isAllCaps=false }
             list.addView(b); b.setOnClickListener {
-                val record=all.firstOrNull { it.id==c }
-                if(record!=null) preview(record) else AlertDialog.Builder(this).setMessage(if(item.has("turns")) "${item.optInt("turns")} 次翻牌 · ${item.optLong("seconds")} 秒" else "对局 ${rounds.length()} 场 · 最佳连胜 ${item.optInt("bestStreak")}").setPositiveButton("关闭",null).show()
+                val record=byId[c]
+                val detail=if(item.has("turns")) "${item.optInt("turns")} 次翻牌 · ${item.optLong("seconds")} 秒" else buildString {
+                    append("胜者：${record?.name ?: "文件已不可用"}\n最佳连胜 ${item.optInt("bestStreak")}\n")
+                    for(j in 0 until rounds.length()) { val r=rounds.getJSONObject(j); append("\n${j+1}. ${byId[r.getLong("winner")]?.name ?: "缺失卡牌"} 胜过 ${byId[r.getLong("loser")]?.name ?: "缺失卡牌"}") }
+                }
+                AlertDialog.Builder(this).setTitle(item.getString("mode")).setMessage(detail).setPositiveButton("关闭",null)
+                    .apply { if(record!=null) setNeutralButton("查看胜者") { _, _ -> preview(record) } }.show()
             }
         }
         appearances.keys.sortedByDescending { crowns[it]?:0 }.forEach { id ->
