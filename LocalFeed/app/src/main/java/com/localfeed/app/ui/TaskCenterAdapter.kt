@@ -41,6 +41,23 @@ class TaskCenterAdapter(
     override fun onBindViewHolder(h: Holder, position: Int) = h.bind(items[position])
     inner class Holder(root: LinearLayout,val thumb:ImageView,val title:TextView,val detail:TextView,val progress:ProgressBar,val status:TextView):RecyclerView.ViewHolder(root){
         fun bind(t:MediaTask){ title.text=t.title; detail.text=t.detail
+            detail.maxLines=3
+            detail.ellipsize=android.text.TextUtils.TruncateAt.END
+            itemView.setOnClickListener {
+                val context=itemView.context
+                val body=TextView(context).apply {
+                    text=t.detail.ifBlank { "这条旧记录没有保存详细原因，需重新执行任务以产生诊断记录。" }
+                    textSize=14f; setTextColor(Color.rgb(225,225,232)); setTextIsSelectable(true)
+                    val pad=(20*resources.displayMetrics.density).toInt(); setPadding(pad,pad,pad,pad)
+                    setBackgroundColor(Color.rgb(28,28,30))
+                }
+                val scroll=android.widget.ScrollView(context).apply { addView(body) }
+                android.app.AlertDialog.Builder(context).setTitle(t.title).setView(scroll)
+                    .setPositiveButton("关闭",null).setNeutralButton("复制详情") { _, _ ->
+                        val clipboard=context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("任务详情",body.text))
+                    }.show()
+            }
             thumb.setImageDrawable(null)
             val record = t.thumbnailUri.takeIf { it.isNotBlank() }?.let { uri ->
                 resolve(uri)?.also { recordCache[uri] = it } ?: recordCache[uri]
@@ -48,7 +65,12 @@ class TaskCenterAdapter(
             if(record != null){ thumb.visibility=android.view.View.VISIBLE; thumbnails.load(record, thumb, 240) } else { thumb.tag = null; thumb.visibility=android.view.View.GONE }
             progress.visibility=if(t.state==TaskState.RUNNING) android.view.View.VISIBLE else android.view.View.GONE
             progress.isIndeterminate=t.total<=0; if(t.total>0) progress.progress=(t.progress*1000/t.total.coerceAtLeast(1))
-            status.text="${when(t.state){TaskState.QUEUED->"排队";TaskState.RUNNING->"进行中";TaskState.DONE->"已完成";TaskState.FAILED->"失败"}} · ${DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(t.updatedAt)}"
+            val stateLabel=when {
+                t.state==TaskState.FAILED && t.detail.contains("副本状态：已校验归档") && t.detail.contains("来源状态：未删除") -> "已归档 · 来源待删除"
+                t.state==TaskState.QUEUED && t.title.startsWith("收件箱") -> "等待检查"
+                else -> when(t.state){TaskState.QUEUED->"排队";TaskState.RUNNING->"进行中";TaskState.DONE->"已完成";TaskState.FAILED->"失败"}
+            }
+            status.text=stateLabel+" · "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(t.updatedAt)
             status.setTextColor(if(t.state==TaskState.FAILED) Color.rgb(255,110,105) else Color.rgb(145,145,153)) }
     }
 }

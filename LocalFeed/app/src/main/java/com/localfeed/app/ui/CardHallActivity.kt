@@ -28,6 +28,7 @@ class CardHallActivity : AppCompatActivity() {
     private var started = 0L
     private var saved = false
     private var epoch = 0
+    private var duelVertical: Boolean? = null
     private val visibleImages = mutableListOf<ImageView>()
     private val prefs by lazy { getSharedPreferences("localfeed_card_games", MODE_PRIVATE) }
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -55,7 +56,7 @@ class CardHallActivity : AppCompatActivity() {
         root.addView(this)
     }
     private fun button(label: String, action: () -> Unit) = Button(this).apply {
-        text = label; isAllCaps = false; setTextColor(Color.WHITE)
+        text = label; isAllCaps = false; setTextColor(Color.WHITE); backgroundTintList=null
         background = GradientDrawable().apply { setColor(Color.rgb(34,38,51)); cornerRadius = dp(14).toFloat(); setStroke(dp(1), Color.rgb(113,95,62)) }
         root.addView(this, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(12) })
         setOnClickListener { action() }
@@ -85,27 +86,49 @@ class CardHallActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setItems(labels.toTypedArray()) { _, i -> if (enough(sizes[i])) action(sizes[i]) }.show()
     }
     private fun beginDuel(n: Int, survival: Boolean) {
+        duelVertical=null
         duel = CardDuel(source.shuffled().take(n).map { it.id }, survival)
         started = System.currentTimeMillis(); saved = false; renderDuel()
     }
     private fun card(id: Long, parent: LinearLayout, action: () -> Unit) {
-        val record = byId[id] ?: return
-        val frame = FrameLayout(this).apply {
-            setPadding(dp(6),dp(6),dp(6),dp(6)); background = CardTier.frame(record.likeCount, resources.displayMetrics.density)
+        val record=byId[id] ?: return
+        var aspect=record.aspectRatio().takeIf { it>0f } ?: 1f
+        val frame=FrameLayout(this).apply {
+            setPadding(dp(3),dp(3),dp(3),dp(3))
+            background=CardTier.frame(record.likeCount,resources.displayMetrics.density)
         }
-        val image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        visibleImages += image
-        frame.addView(image, FrameLayout.LayoutParams(-1,-1))
-        parent.addView(frame, LinearLayout.LayoutParams(0,-1,1f).apply { setMargins(dp(3),dp(3),dp(3),dp(3)) })
-        thumbs.load(record, image, 720) { ok -> if (!ok) image.setImageResource(android.R.drawable.ic_menu_report_image) }
-        frame.setOnClickListener { action() }
-        frame.setOnLongClickListener { preview(record); true }
+        val slot=object : FrameLayout(this) {
+            fun fitFrame() {
+                if(width<=0 || height<=0) return
+                val size=CardGeometry.fit((width-dp(12)).coerceAtLeast(1),(height-dp(12)).coerceAtLeast(1),aspect)
+                frame.layoutParams=FrameLayout.LayoutParams(size.first+dp(6),size.second+dp(6),Gravity.CENTER)
+            }
+            override fun onSizeChanged(w: Int,h: Int,oldw: Int,oldh: Int) {
+                super.onSizeChanged(w,h,oldw,oldh); fitFrame()
+            }
+        }.apply { setBackgroundColor(Color.TRANSPARENT) }
+        val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.TRANSPARENT) }
+        visibleImages+=image
+        frame.addView(image,FrameLayout.LayoutParams(-1,-1))
+        slot.addView(frame,FrameLayout.LayoutParams(1,1,Gravity.CENTER))
+        val params=if(parent.orientation==LinearLayout.VERTICAL) LinearLayout.LayoutParams(-1,0,1f) else LinearLayout.LayoutParams(0,-1,1f)
+        parent.addView(slot,params)
+        thumbs.load(record,image,720) { ok ->
+            if(ok) {
+                val drawable=image.drawable
+                if(drawable!=null && drawable.intrinsicWidth>0 && drawable.intrinsicHeight>0)
+                    aspect=drawable.intrinsicWidth.toFloat()/drawable.intrinsicHeight
+            } else image.setImageResource(android.R.drawable.ic_menu_report_image)
+            slot.fitFrame()
+        }
+        slot.setOnClickListener { action() }
+        slot.setOnLongClickListener { preview(record); true }
     }
     private fun preview(record: MediaRecord) {
-        val image = ZoomImageView(this)
+        val image = ZoomImageView(this).apply { setBackgroundColor(Color.rgb(17,19,27)) }
         val dialog = AlertDialog.Builder(this).setView(image).setPositiveButton("关闭", null).create()
         dialog.show(); dialog.window?.setLayout(-1, dp(560)); thumbs.load(record,image,1600)
-        dialog.setOnDismissListener { image.tag = null }
+        dialog.setOnDismissListener { thumbs.clear(image) }
     }
     private fun renderDuel() {
         panel(); val g = duel ?: return
@@ -122,8 +145,24 @@ class CardHallActivity : AppCompatActivity() {
         text(if (g.survival) "连胜 ${g.streak} · 已对决 ${g.history.size} 场" else "已完成 ${g.history.size} 场")
         text("点击选出更喜欢的一张 · 长按放大")
         val row = LinearLayout(this); root.addView(row, LinearLayout.LayoutParams(-1,0,1f))
+        if(duelVertical==null) {
+            duelVertical=when(prefs.getString("duel_layout","auto")) {
+                "vertical" -> true
+                "horizontal" -> false
+                else -> CardGeometry.preferVertical(byId[pair.first]?.aspectRatio() ?: 1f,
+                    byId[pair.second]?.aspectRatio() ?: 1f,
+                    resources.displayMetrics.widthPixels-dp(40),
+                    (resources.displayMetrics.heightPixels-dp(270)).coerceAtLeast(dp(160)))
+            }
+        }
+        row.orientation=if(duelVertical==true) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         card(pair.first,row) { g.choose(pair.first); renderDuel() }
         card(pair.second,row) { g.choose(pair.second); renderDuel() }
+        button(if(duelVertical==true) "▥  切换左右布局" else "▤  切换上下布局") {
+            duelVertical=duelVertical!=true
+            prefs.edit().putString("duel_layout",if(duelVertical==true) "vertical" else "horizontal").apply()
+            renderDuel()
+        }
         button("结束并返回") {
             if (g.survival && g.history.isNotEmpty() && !saved) { saveDuel(g); saved = true }; hall()
         }
@@ -144,7 +183,7 @@ class CardHallActivity : AppCompatActivity() {
                     card(g.cards[i],row) { all.firstOrNull { it.id == g.cards[i] }?.let(::preview) }
                 } else {
                     val b = Button(this).apply {
-                        text = "✦"; textSize = 26f; setTextColor(Color.rgb(225,193,125))
+                        text = "✦"; textSize = 26f; backgroundTintList=null; setTextColor(Color.rgb(225,193,125))
                         background = GradientDrawable().apply { setColor(Color.rgb(36,39,53)); cornerRadius=dp(10).toFloat(); setStroke(dp(1),Color.rgb(113,95,62)) }
                     }
                     row.addView(b,LinearLayout.LayoutParams(0,-1,1f).apply { setMargins(dp(3),dp(3),dp(3),dp(3)) })

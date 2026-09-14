@@ -93,6 +93,22 @@ class TaskCenter(context: Context) {
         it.copy(detail = detail, state = TaskState.FAILED, updatedAt = System.currentTimeMillis(), targetIds = emptyList(), completedIds = emptySet())
     }
 
+    /** One durable task per inbox file, updated through all stages, never generic failure only. */
+    @Synchronized fun reportInbox(event: com.localfeed.app.data.InboxEvent) {
+        val id=UUID.nameUUIDFromBytes(("inbox:"+event.key).toByteArray(Charsets.UTF_8)).toString()
+        val state=when(event.status) {
+            com.localfeed.app.data.InboxStatus.WAITING -> TaskState.QUEUED
+            com.localfeed.app.data.InboxStatus.RUNNING -> TaskState.RUNNING
+            com.localfeed.app.data.InboxStatus.DONE -> TaskState.DONE
+            else -> TaskState.FAILED
+        }
+        val task=MediaTask(id,"收件箱 · "+event.name,event.detail,state,0,0,event.uri,System.currentTimeMillis())
+        val index=tasks.indexOfFirst { it.id==id }
+        if(index<0) tasks.add(0,task) else tasks[index]=task
+        val terminal=state==TaskState.DONE || state==TaskState.FAILED
+        commit(forcePersist=terminal, durable=terminal, forceNotify=terminal)
+    }
+
     @Synchronized fun snapshot(): List<MediaTask> = tasks.toList()
 
     @Synchronized fun clearFinished() {
@@ -120,7 +136,13 @@ class TaskCenter(context: Context) {
      * tick used to stall the UI and could trigger an ANR exactly when a scan completed.
      */
     private fun commit(forcePersist: Boolean, durable: Boolean = false, forceNotify: Boolean = false) {
-        while (tasks.size > 80) tasks.removeLast()
+        while(tasks.size>80) {
+            // Inbox histories must never evict an active, resumable deletion task.
+            val index=tasks.indexOfLast { it.state==TaskState.DONE || it.state==TaskState.FAILED }
+                .takeIf { it>=0 } ?: tasks.indexOfLast { it.operation==TaskOperation.NONE }
+            if(index<0) break
+            tasks.removeAt(index)
+        }
         val now = System.currentTimeMillis()
         if (forcePersist || now - lastPersistAt >= 1_000L) {
             val array = JSONArray()
@@ -155,7 +177,7 @@ class TaskCenter(context: Context) {
             }
             val targets = o.optJSONArray("targetIds").toLongList()
             val completed = o.optJSONArray("completedIds").toLongList().toSet()
-            val detail = if (savedState == TaskState.RUNNING && operation != TaskOperation.NONE) "上次中断 · 等待自动继续" else if (savedState == TaskState.RUNNING) "应用中断 · 此任务未完成" else o.optString("detail")
+            val detail = if (savedState == TaskState.RUNNING && operation != TaskOperation.NONE) "上次中断 · 等待自动继续" else if (savedState == TaskState.RUNNING) "应用中断 · 此任务未完成\n上次阶段与原因：\n" + o.optString("detail") else o.optString("detail")
             add(MediaTask(
                 o.getString("id"), o.getString("title"), detail, state,
                 completed.size.coerceAtLeast(o.optInt("progress")), targets.size.coerceAtLeast(o.optInt("total")),

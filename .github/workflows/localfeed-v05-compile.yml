@@ -1,4 +1,4 @@
-name: LocalFeed v0.9.0 Compile and Release
+name: LocalFeed v0.9.1 Compile and Release
 
 permissions:
   contents: write
@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - localfeed-build
+    paths-ignore:
+      - localfeed_ci/update.json
   workflow_dispatch:
 
 jobs:
@@ -16,15 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Promote verified v0.9.0 release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view localfeed-v0.9.0 >/dev/null 2>&1; then
-            gh release edit localfeed-v0.9.0 --prerelease=false --latest \
-              --title "LocalFeed v0.9.0" \
-              --notes "新增下载收件箱、卡牌大厅、锦标赛、记忆配对、生存擂台和独立战绩。Android 编译、回归测试和固定签名校验已通过；实机验收范围与限制见 LocalFeed/docs/V0.9.0.md。"
-          fi
       - name: JDK 17
         uses: actions/setup-java@v4
         with:
@@ -43,18 +36,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-      - name: Verify tracked v0.9.0 source
+      - name: Verify tracked v0.9.1 source
         run: python3 localfeed_ci/verify_v05_source.py
       - name: Pure Kotlin regression tests
         working-directory: LocalFeed
         run: bash tools/run-smoke-tests.sh
-      - name: Assemble v0.9.0
+      - name: Assemble v0.9.1
         working-directory: LocalFeed
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - name: Re-sign APK with fixed key
         run: |
           IN=LocalFeed/app/build/outputs/apk/debug/app-debug.apk
-          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.0-fixed-signature.apk
+          OUT=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.1-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks "$HOME/.android/debug.keystore" \
             --ks-key-alias androiddebugkey \
@@ -64,7 +57,7 @@ jobs:
             "$IN"
       - name: Verify fixed certificate
         run: |
-          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.0-fixed-signature.apk
+          APK=LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.1-fixed-signature.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
           ACTUAL=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')
           EXPECTED=2fcf7ed9c4823aa9589c53102b559de274b7ab84f636ded79957aa88746ab7a6
@@ -73,10 +66,10 @@ jobs:
       - name: Package verified deliverables
         run: |
           mkdir -p dist
-          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.0-fixed-signature.apk dist/LocalFeed-v0.9.0.apk
-          sha256sum dist/LocalFeed-v0.9.0.apk > dist/SHA256SUMS.txt
+          cp LocalFeed/app/build/outputs/apk/debug/LocalFeed-v0.9.1-fixed-signature.apk dist/LocalFeed-v0.9.1.apk
+          sha256sum dist/LocalFeed-v0.9.1.apk > dist/SHA256SUMS.txt
           {
-            echo "LocalFeed v0.9.0 / versionCode 18"
+            echo "LocalFeed v0.9.1 / versionCode 19"
             echo "Source commit: $GITHUB_SHA"
             echo "CI run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Source integrity, uniform/optional-bias feed, FeedSession, AlbumQuery, scanner smoke: PASS"
@@ -89,25 +82,25 @@ jobs:
           import json, zipfile
           paths = list(json.loads(Path('localfeed_ci/v05_source_sha256.json').read_text()))
           paths += ['README.md', 'localfeed_ci/v05_source_sha256.json', 'localfeed_ci/verify_v05_source.py', 'localfeed_ci/stable_debug_keystore.b64', 'localfeed_ci/update.json', '.github/workflows/localfeed-v05-compile.yml']
-          with zipfile.ZipFile('dist/LocalFeed-v0.9.0-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+          with zipfile.ZipFile('dist/LocalFeed-v0.9.1-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
               for name in paths: archive.write(name, name)
               archive.write('dist/BUILD_REPORT.txt', 'BUILD_REPORT.txt')
           PYZIP
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LocalFeed-v0.9.0-fixed-signature-apk
+          name: LocalFeed-v0.9.1-fixed-signature-apk
           path: dist/*
           if-no-files-found: error
       - name: Publish in-app update release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view localfeed-v0.9.0 >/dev/null 2>&1; then
-            gh release upload localfeed-v0.9.0 dist/LocalFeed-v0.9.0.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt --clobber
+          if gh release view localfeed-v0.9.1 >/dev/null 2>&1; then
+            gh release upload localfeed-v0.9.1 dist/LocalFeed-v0.9.1.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt --clobber
           else
-            gh release create localfeed-v0.9.0 dist/LocalFeed-v0.9.0.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt \
-              --title "LocalFeed v0.9.0" \
-              --notes "新增下载收件箱、卡牌大厅、锦标赛、记忆配对与生存擂台。实机验收范围与限制见 LocalFeed/docs/V0.9.0.md。" \
+            gh release create localfeed-v0.9.1 dist/LocalFeed-v0.9.1.apk dist/SHA256SUMS.txt dist/BUILD_REPORT.txt \
+              --title "LocalFeed v0.9.1" \
+              --notes "修复收件箱副本重命名，新增通用阶段诊断、等待状态、失败详情与复制详情；收紧卡牌边框并支持上下/左右布局切换。实机验收范围见 LocalFeed/docs/V0.9.1.md。" \
               --latest
           fi

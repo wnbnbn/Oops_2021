@@ -3,6 +3,10 @@ set -euo pipefail
 KOTLIN_DIR=$(mktemp -d)
 trap 'rm -rf "$KOTLIN_DIR"' EXIT
 CORE=app/src/main/java/com/localfeed/app/core
+kotlinc app/src/main/java/com/localfeed/app/data/DownloadInbox.kt tools/inbox-stubs/*.kt tools/DownloadInboxTest.kt -include-runtime -d "$KOTLIN_DIR/inbox.jar"
+java -jar "$KOTLIN_DIR/inbox.jar"
+kotlinc "$CORE/CardGeometry.kt" tools/CardGeometryTest.kt -include-runtime -d "$KOTLIN_DIR/geometry.jar"
+java -jar "$KOTLIN_DIR/geometry.jar"
 kotlinc "$CORE/CardGames.kt" tools/CardGamesTest.kt -include-runtime -d "$KOTLIN_DIR/cards.jar"
 java -jar "$KOTLIN_DIR/cards.jar"
 kotlinc "$CORE/MediaRecord.kt" "$CORE/WeightedFeedEngine.kt" tools/FeedEngineSmokeTest.kt -include-runtime -d "$KOTLIN_DIR/feed.jar"

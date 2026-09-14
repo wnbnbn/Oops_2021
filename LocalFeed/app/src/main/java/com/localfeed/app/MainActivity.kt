@@ -1298,10 +1298,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 if (summary.authorizationNeeded > 0) taskCenter.fail(taskId, "$detail · ${summary.authorizationNeeded} 个目录需重新授权") else taskCenter.finish(taskId, detail)
                 if (b.feedPager.visibility == View.VISIBLE) b.feedPager.post { settlePage(currentFeedPosition) }
             } },
-            onInboxFile = { name, uri, detail, ok -> runOnUiThread {
-                val inboxTask = taskCenter.start("收件箱 · $name", detail, uri)
-                if(ok) taskCenter.finish(inboxTask,detail) else taskCenter.fail(inboxTask,detail)
-            } },
+            onInboxEvent = { event -> taskCenter.reportInbox(event) },
             onFailed = { message -> runOnUiThread {
                 scanInProgress = false
                 taskCenter.fail(taskId, message)
