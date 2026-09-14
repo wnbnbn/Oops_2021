@@ -283,3 +283,6 @@ python3 localfeed_ci/verify_v05_source.py
 当前工程以完整 LocalFeed v0.4 源码 ZIP 为恢复基线，并合入 GitHub `localfeed-build` 分支中较新的 v0.5 及后续修改。早期相似视频源码曾因分片损坏而重建；当前构建已完全脱离分片还原流程。
 
 详细版本记录见 [`LocalFeed/CHANGELOG.md`](LocalFeed/CHANGELOG.md)，真机验收项见 [`LocalFeed/TEST_REPORT.md`](LocalFeed/TEST_REPORT.md)。
+# v0.9.0 开发说明
+
+本轮新增下载收件箱和独立图片卡牌大厅（三种小游戏）。具体实现、操作及待验收项见 [v0.9.0 开发说明](LocalFeed/docs/V0.9.0.md)。原视频播放核心保持 v0.8.1 实现。

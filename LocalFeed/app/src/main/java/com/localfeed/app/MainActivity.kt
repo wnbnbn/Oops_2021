@@ -135,6 +135,30 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         uri ?: return@registerForActivityResult
         handlePickedFolder(uri)
     }
+    private var inboxSource: Uri? = null
+    private val pickInboxSource = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                .onSuccess { inboxSource = uri; pickInboxTarget.launch(null) }
+                .onFailure { Toast.makeText(this, "来源目录授权失败", Toast.LENGTH_LONG).show() }
+        }
+    }
+    private val pickInboxTarget = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { target ->
+        val source = inboxSource
+        inboxSource = null
+        if (target != null && source != null) {
+            runCatching { contentResolver.takePersistableUriPermission(target, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                .onFailure { Toast.makeText(this, "归档目录授权失败", Toast.LENGTH_LONG).show() }
+                .onSuccess {
+                    AlertDialog.Builder(this).setTitle("添加下载收件箱？")
+                        .setMessage("扫描时，会将来源目录内已稳定至少 30 秒的视频与图片转移到归档目录。校验成功后删除来源文件；同名文件不会覆盖。仅处理目录内文件，不包含子目录。\n\n来源：${DocumentFile.fromTreeUri(this, source)?.name}\n归档：${DocumentFile.fromTreeUri(this, target)?.name}")
+                        .setNegativeButton("取消", null).setPositiveButton("添加") { _, _ ->
+                            runCatching { com.localfeed.app.data.DownloadInbox(this).add(source,target); repository.addFolder(target) }
+                                .onSuccess { showInboxMenu() }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
+                        }.show()
+                }
+        }
+    }
 
     private val exportFolderConfig = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri ?: return@registerForActivityResult
@@ -685,7 +709,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
     }
 
     private fun showLibraryMenu() {
-        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值", "媒体统计", "检查更新 · 当前 ${BuildConfig.VERSION_NAME}")
+        val labels = arrayOf("任务中心", "问题媒体", "典藏册", "重复视频清理", "最近导入记录", "随机偏好", "最近删除", "播放页按钮", "卡牌等级", "长视频阈值", "媒体统计", "检查更新 · 当前 ${BuildConfig.VERSION_NAME}", "卡牌大厅", "下载收件箱")
         AlertDialog.Builder(this).setTitle("媒体库工具").setItems(labels) { _, which ->
             when (which) {
                 0 -> showTaskCenter()
@@ -700,6 +724,27 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 9 -> showLongVideoThresholdDialog()
                 10 -> showMediaStatistics()
                 11 -> appUpdater.check()
+                12 -> { playback.pauseOnly(); startActivity(Intent(this, com.localfeed.app.ui.CardHallActivity::class.java)) }
+                13 -> showInboxMenu()
+            }
+        }.show()
+    }
+
+    private fun showInboxMenu() {
+        val inbox = com.localfeed.app.data.DownloadInbox(this)
+        val rules = inbox.rules()
+        val labels = rules.map { "${if(it.enabled) "已启用" else "已暂停"} · ${DocumentFile.fromTreeUri(this,Uri.parse(it.source))?.name ?: "来源"} → ${DocumentFile.fromTreeUri(this,Uri.parse(it.target))?.name ?: "归档"}" } + "添加收件箱" + "立即扫描"
+        AlertDialog.Builder(this).setTitle("下载收件箱").setItems(labels.toTypedArray()) { _, index ->
+            when(index) {
+                rules.size -> pickInboxSource.launch(null)
+                rules.size+1 -> scanAll()
+                else -> {
+                    val rule=rules[index]
+                    AlertDialog.Builder(this).setTitle("收件箱设置").setItems(arrayOf(if(rule.enabled) "暂停转移" else "启用转移", "移除配置（保留所有文件）")) { _, action ->
+                        if(action==0) inbox.toggle(rule.id) else inbox.remove(rule.id)
+                        showInboxMenu()
+                    }.show()
+                }
             }
         }.show()
     }
@@ -1252,6 +1297,10 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
                 val detail = "新增 ${summary.newFiles} · 更新 ${summary.updatedFiles} · 问题 $errors"
                 if (summary.authorizationNeeded > 0) taskCenter.fail(taskId, "$detail · ${summary.authorizationNeeded} 个目录需重新授权") else taskCenter.finish(taskId, detail)
                 if (b.feedPager.visibility == View.VISIBLE) b.feedPager.post { settlePage(currentFeedPosition) }
+            } },
+            onInboxFile = { name, uri, detail, ok -> runOnUiThread {
+                val inboxTask = taskCenter.start("收件箱 · $name", detail, uri)
+                if(ok) taskCenter.finish(inboxTask,detail) else taskCenter.fail(inboxTask,detail)
             } },
             onFailed = { message -> runOnUiThread {
                 scanInProgress = false
