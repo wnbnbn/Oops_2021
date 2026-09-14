@@ -1,6 +1,6 @@
 {
-  "version": "0.9.1",
-  "notes": "修复收件箱副本重命名，加入通用阶段诊断、等待状态、失败详情与复制详情；收紧卡牌边框，锦标赛和擂台支持上下/左右布局切换。",
-  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.1/LocalFeed-v0.9.1.apk",
-  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.1/SHA256SUMS.txt"
+  "version": "0.9.2",
+  "notes": "修复收件箱旧归档记录恢复、目录切换与临时副本重试；切换卡牌布局保留图片，修复消失问题；长按图片预览改为全屏和悬浮关闭按钮。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.2/LocalFeed-v0.9.2.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.2/SHA256SUMS.txt"
 }
