@@ -1,6 +1,6 @@
 {
-  "version": "0.9.2",
-  "notes": "修复收件箱旧归档记录恢复、目录切换与临时副本重试；切换卡牌布局保留图片，修复消失问题；长按图片预览改为全屏和悬浮关闭按钮。",
-  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.2/LocalFeed-v0.9.2.apk",
-  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.2/SHA256SUMS.txt"
+  "version": "0.9.3",
+  "notes": "收件箱转移独立调度并逐项索引；缩短批量分析锁占用、减少重复读取；卡牌预览增加信息、分享、其他应用打开与队列删除，修复空白区域误选。实机验收范围见 LocalFeed/docs/V0.9.3.md。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.3/LocalFeed-v0.9.3.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.3/SHA256SUMS.txt"
 }
