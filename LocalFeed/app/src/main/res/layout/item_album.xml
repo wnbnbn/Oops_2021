@@ -66,22 +66,6 @@
         android:textSize="14sp" />
 
     <TextView
-        android:id="@+id/tierBadge"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal|bottom"
-        android:layout_margin="6dp"
-        android:background="@drawable/media_badge_bg"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
-        android:textColor="@android:color/white"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
-
-    <TextView
         android:id="@+id/currentBadge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

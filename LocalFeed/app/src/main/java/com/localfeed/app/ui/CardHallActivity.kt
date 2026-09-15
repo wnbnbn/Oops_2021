@@ -104,9 +104,10 @@ class CardHallActivity : AppCompatActivity() {
     private fun card(id: Long, parent: LinearLayout, action: () -> Unit) {
         val record=byId[id] ?: return
         var aspect=record.aspectRatio().takeIf { it>0f } ?: 1f
-        val frame=FrameLayout(this).apply {
+        val frame=HoloCardView(this).apply {
+            dynamic=duel!=null
             setPadding(dp(3),dp(3),dp(3),dp(3))
-            background=CardTier.frame(record.likeCount,resources.displayMetrics.density)
+            setLikeCount(record.likeCount)
         }
         val slot=object : FrameLayout(this) {
             override fun onMeasure(widthMeasureSpec: Int,heightMeasureSpec: Int) {
@@ -173,10 +174,11 @@ class CardHallActivity : AppCompatActivity() {
     }
     private fun previewActions(record: MediaRecord) {
         AlertDialog.Builder(this).setTitle("图片更多").setItems(
-            arrayOf("文件信息","分享","其他应用打开","移到最近删除","永久删除")
+            arrayOf("查看闪卡","文件信息","分享","其他应用打开","移到最近删除","永久删除")
         ) { _, which ->
             when(which) {
-                0 -> {
+                0 -> startActivity(HoloCardActivity.intent(this,record.id))
+                1 -> {
                     val date=java.text.DateFormat.getDateTimeInstance()
                     AlertDialog.Builder(this).setTitle(record.name).setMessage(
                         "目录："+MediaPathUtils.absoluteDirectoryPath(record)+
@@ -186,18 +188,18 @@ class CardHallActivity : AppCompatActivity() {
                         "\n点赞："+record.likeCount+"\n收藏："+(if(record.favorited) "是" else "否")
                     ).setPositiveButton("关闭",null).show()
                 }
-                1,2 -> {
+                2,3 -> {
                     val uri=Uri.parse(record.uri)
-                    val intent=if(which==1) Intent(Intent.ACTION_SEND).apply {
+                    val intent=if(which==2) Intent(Intent.ACTION_SEND).apply {
                         type=record.mime; putExtra(Intent.EXTRA_STREAM,uri)
                     } else Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri,record.mime) }
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     intent.clipData=ClipData.newRawUri(record.name,uri)
-                    runCatching { startActivity(Intent.createChooser(intent,if(which==1) "分享图片" else "选择应用")) }
+                    runCatching { startActivity(Intent.createChooser(intent,if(which==2) "分享图片" else "选择应用")) }
                         .onFailure { Toast.makeText(this,"无法打开："+(it.message ?: "没有可用应用"),Toast.LENGTH_LONG).show() }
                 }
-                3,4 -> {
-                    val permanent=which==4
+                4,5 -> {
+                    val permanent=which==5
                     AlertDialog.Builder(this).setTitle(if(permanent) "永久删除这张图片？" else "移到最近删除？")
                         .setMessage(record.name+"\n\n"+
                             (if(permanent) "永久删除无法恢复。" else "可以在最近删除中恢复。")+
@@ -219,7 +221,7 @@ class CardHallActivity : AppCompatActivity() {
         if (pair == null) {
             text("本局胜者", 18f)
             val row = LinearLayout(this); root.addView(row, LinearLayout.LayoutParams(-1,0,1f))
-            g.champion?.let { card(it,row) { all.firstOrNull { r -> r.id == it }?.let(::preview) } }
+            g.champion?.let { card(it,row) { startActivity(HoloCardActivity.intent(this,it)) } }
             if (!saved) { saveDuel(g); saved = true }
             button("再来一局") { beginDuel(g.history.size+1,g.survival) }
             button("回到大厅") { hall() }; return
@@ -320,7 +322,7 @@ class CardHallActivity : AppCompatActivity() {
                     for(j in 0 until rounds.length()) { val r=rounds.getJSONObject(j); append("\n${j+1}. ${byId[r.getLong("winner")]?.name ?: "缺失卡牌"} 胜过 ${byId[r.getLong("loser")]?.name ?: "缺失卡牌"}") }
                 }
                 AlertDialog.Builder(this).setTitle(item.getString("mode")).setMessage(detail).setPositiveButton("关闭",null)
-                    .apply { if(record!=null) setNeutralButton("查看胜者") { _, _ -> preview(record) } }.show()
+                    .apply { if(record!=null) setNeutralButton("查看胜者") { _, _ -> startActivity(HoloCardActivity.intent(this@CardHallActivity,record.id)) } }.show()
             }
         }
         appearances.keys.sortedByDescending { crowns[it]?:0 }.forEach { id ->

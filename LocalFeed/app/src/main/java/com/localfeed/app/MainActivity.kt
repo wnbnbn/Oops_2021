@@ -1640,6 +1640,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         val labels = arrayOf(
             if (inComic) "切换到单图" else "切换到瀑布流",
             "洗牌 / 重置瀑布流",
+            "查看闪卡",
             "分享",
             "用其他应用打开",
             "点赞 -1",
@@ -1649,26 +1650,27 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
             "媒体信息"
         )
         val dialog = AlertDialog.Builder(this)
-            .setTitle("${CardTier.forCount(record.likeCount).title} · ${record.name}")
+            .setTitle(record.name)
             .setItems(labels) { _, which ->
                 when (which) {
                     0 -> toggleComicReader()
                     1 -> reshuffleImages()
-                    2 -> share(record)
-                    3 -> openExternally(record)
-                    4 -> {
+                    2 -> startActivity(com.localfeed.app.ui.HoloCardActivity.intent(this,record.id))
+                    3 -> share(record)
+                    4 -> openExternally(record)
+                    5 -> {
                         val count = (record.likeCount - 1).coerceAtLeast(0)
                         repository.setLikeCount(record.id, count)
                         replaceImageRecord(record.copy(liked = count > 0, likeCount = count))
                     }
-                    5 -> resetCurrentImageLikes()
-                    6 -> {
+                    6 -> resetCurrentImageLikes()
+                    7 -> {
                         val updated = record.copy(specialMark = !record.specialMark)
                         repository.setSpecialMark(record.id, updated.specialMark)
                         replaceImageRecord(updated)
                     }
-                    7 -> confirmDeleteCurrentImage()
-                    8 -> showInfo(record)
+                    8 -> confirmDeleteCurrentImage()
+                    9 -> showInfo(record)
                 }
             }.show()
         val tier = CardTier.forCount(record.likeCount)
@@ -1866,7 +1868,7 @@ class MainActivity : AppCompatActivity(), FeedAdapter.Callbacks, PlaybackCoordin
         if (position !in 0 until feedAdapter.itemCount) return
         val record = feedAdapter.itemAt(position)
         val labels = arrayOf("从头播放", "播放速度", "画面显示", if (clearScreen) "退出清屏" else "清屏观看", if (autoAdvance) "播放结束：自动下一条" else "播放结束：单条循环", "用其他应用打开", "分享", "点赞 -1", "清空点赞", if (record.specialMark) "取消特殊标记" else "添加特殊标记", "永久删除", "媒体信息")
-        val dialog = AlertDialog.Builder(this).setTitle("${CardTier.forCount(record.likeCount).title} · ${record.name}").setItems(labels) { _, which ->
+        val dialog = AlertDialog.Builder(this).setTitle(record.name).setItems(labels) { _, which ->
             when (which) {
                 0 -> if (playback.isCurrent(record.id)) playback.seekTo(0L)
                 1 -> showSpeedDialog()

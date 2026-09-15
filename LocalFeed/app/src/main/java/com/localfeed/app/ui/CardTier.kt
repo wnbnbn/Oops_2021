@@ -18,11 +18,11 @@ data class CardTier(val level: Int, val title: String, val color: Int, val width
         }
         fun thresholds(): IntArray = limits.copyOf()
         fun forCount(count: Int): CardTier = when {
-            count >= limits[4] -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.5f, "典藏")
-            count >= limits[3] -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2f, "幻彩")
-            count >= limits[2] -> CardTier(3, "金耀", Color.rgb(242, 190, 61), 2f, "金耀")
-            count >= limits[1] -> CardTier(2, "银曜", Color.rgb(159, 199, 224), 1.5f, "银曜")
-            count >= limits[0] -> CardTier(1, "铜辉", Color.rgb(194, 119, 74), 1.5f, "铜辉")
+            count >= limits[4] -> CardTier(5, "典藏", Color.rgb(235, 196, 92), 2.6f, "")
+            count >= limits[3] -> CardTier(4, "幻彩", Color.rgb(171, 111, 255), 2.2f, "")
+            count >= limits[2] -> CardTier(3, "金耀", Color.rgb(226, 178, 71), 2f, "")
+            count >= limits[1] -> CardTier(2, "银曜", Color.rgb(177, 190, 201), 1.7f, "")
+            count >= limits[0] -> CardTier(1, "铜辉", Color.rgb(181, 111, 69), 1.8f, "")
             else -> CardTier(0, "普通", Color.rgb(82, 82, 86), 1f, "")
         }
 
@@ -30,34 +30,37 @@ data class CardTier(val level: Int, val title: String, val color: Int, val width
     }
 }
 
-/** Distinct constructions inspired by mature collectible-card rarity frames. */
+/** Quiet thumbnail frames: material and light distinguish tiers without labels or corner clutter. */
 private class CardFrameDrawable(private val tier: CardTier, private val density: Float) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.MITER }
     override fun draw(canvas: Canvas) {
-        val inset = tier.widthDp * density
+        val inset = (tier.widthDp + .45f) * density
         val r = RectF(bounds).apply { inset(inset, inset) }
-        paint.strokeWidth = inset.coerceAtLeast(1f)
-        paint.shader = if (tier.level == 4) LinearGradient(r.left, r.top, r.right, r.bottom,
-            intArrayOf(Color.rgb(67,190,255), Color.rgb(157,91,255), Color.rgb(255,91,126), Color.rgb(250,194,72)), null, Shader.TileMode.CLAMP) else null
-        paint.color = tier.color
-        canvas.drawRoundRect(r, 5*density, 5*density, paint)
-        when (tier.level) {
-            1 -> {
-                val c=10*density; canvas.drawLine(r.left,r.top+c,r.left+c,r.top,paint); canvas.drawLine(r.right-c,r.bottom,r.right,r.bottom-c,paint)
+        val colors = when(tier.level) {
+            1 -> intArrayOf(0xFF56301F.toInt(),0xFFD58A54.toInt(),0xFF6E3A25.toInt(),0xFFF0B27A.toInt(),0xFF4B281C.toInt())
+            2 -> intArrayOf(0xFF59636C.toInt(),0xFFE7EEF3.toInt(),0xFF778691.toInt(),0xFFFFFFFF.toInt(),0xFF4A545C.toInt())
+            3 -> intArrayOf(0xFF6E4B17.toInt(),0xFFFFDF7A.toInt(),0xFFB77A20.toInt(),0xFFFFF0AB.toInt(),0xFF72501E.toInt())
+            4 -> intArrayOf(0xFF26333B.toInt(),0xFF66D9F4.toInt(),0xFFB478EF.toInt(),0xFFF284AF.toInt(),0xFFF2CB6B.toInt(),0xFF29353B.toInt())
+            5 -> intArrayOf(0xFF5E431F.toInt(),0xFFFFEAB0.toInt(),0xFFFFFFFF.toInt(),0xFFC98A37.toInt(),0xFFFFE8A0.toInt(),0xFF5B4020.toInt())
+            else -> intArrayOf(0xFF35363A.toInt(),0xFF62646A.toInt(),0xFF333438.toInt())
+        }
+        paint.shader=LinearGradient(r.left,r.top,r.right,r.bottom,colors,null,Shader.TileMode.CLAMP)
+        paint.strokeWidth=(tier.widthDp*density).coerceAtLeast(1f)
+        paint.alpha=if(tier.level==0) 155 else 245
+        canvas.drawRoundRect(r,6*density,6*density,paint)
+        if(tier.level>0) {
+            val inner=RectF(r).apply { inset(2.7f*density,2.7f*density) }
+            paint.shader=null
+            paint.color=when(tier.level) {
+                1 -> 0x88FFD0A3.toInt()
+                2 -> 0x99FFFFFF.toInt()
+                3 -> 0x99FFF0B0.toInt()
+                4 -> 0x886EEAFF.toInt()
+                else -> 0xAAFFF1BF.toInt()
             }
-            2 -> {
-                val inner=RectF(r).apply { inset(3*density,3*density) }; paint.strokeWidth=density; canvas.drawRoundRect(inner,3*density,3*density,paint)
-            }
-            3 -> {
-                val c=12*density; paint.strokeWidth=3*density
-                canvas.drawLine(r.left,r.top+c,r.left,r.top,paint); canvas.drawLine(r.left,r.top,r.left+c,r.top,paint)
-                canvas.drawLine(r.right-c,r.top,r.right,r.top,paint); canvas.drawLine(r.right,r.top,r.right,r.top+c,paint)
-                canvas.drawLine(r.left,r.bottom-c,r.left,r.bottom,paint); canvas.drawLine(r.left,r.bottom,r.left+c,r.bottom,paint)
-                canvas.drawLine(r.right-c,r.bottom,r.right,r.bottom,paint); canvas.drawLine(r.right,r.bottom,r.right,r.bottom-c,paint)
-            }
-            5 -> {
-                val inner=RectF(r).apply { inset(4*density,4*density) }; paint.shader=null; paint.color=Color.rgb(151,91,238); paint.strokeWidth=1.4f*density; canvas.drawRoundRect(inner,3*density,3*density,paint)
-            }
+            paint.strokeWidth=.65f*density
+            paint.alpha=190
+            canvas.drawRoundRect(inner,4*density,4*density,paint)
         }
     }
     override fun setAlpha(alpha: Int) { paint.alpha=alpha }

@@ -216,13 +216,9 @@ class AlbumAdapter(
         }
 
         fun bindState(item: MediaRecord) {
-            b.stateBadge.text = buildString {
-                if (item.liked) append("♥")
-                if (item.favorited) append("★")
-            }
+            b.stateBadge.text = if (item.favorited) "★" else ""
             b.stateBadge.visibility = if (b.stateBadge.text.isNullOrBlank()) View.GONE else View.VISIBLE
             b.currentBadge.visibility = if (item.id == highlightedMediaId) View.VISIBLE else View.GONE
-            val tier = CardTier.forCount(item.likeCount)
             b.cardFrame.background = if (item.id == highlightedMediaId) {
                 android.graphics.drawable.GradientDrawable().apply {
                     setColor(android.graphics.Color.TRANSPARENT)
@@ -230,9 +226,6 @@ class AlbumAdapter(
                     setStroke((3f * b.root.resources.displayMetrics.density).toInt(), 0xFFFF725E.toInt())
                 }
             } else CardTier.frame(item.likeCount, b.root.resources.displayMetrics.density)
-            b.tierBadge.text = tier.badge
-            b.tierBadge.setTextColor(tier.color)
-            b.tierBadge.visibility = if (tier.badge.isBlank()) View.GONE else View.VISIBLE
             b.problemBadge.visibility = if (item.id in problemIds) View.VISIBLE else View.GONE
             b.specialBadge.visibility = if (item.specialMark) View.VISIBLE else View.GONE
             specialAnimator?.cancel()
