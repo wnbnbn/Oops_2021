@@ -1,6 +1,6 @@
 {
-  "version": "0.9.3",
-  "notes": "收件箱转移独立调度并逐项索引；缩短批量分析锁占用、减少重复读取；卡牌预览增加信息、分享、其他应用打开与队列删除，修复空白区域误选。实机验收范围见 LocalFeed/docs/V0.9.3.md。",
-  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.3/LocalFeed-v0.9.3.apk",
-  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.3/SHA256SUMS.txt"
+  "version": "0.9.4",
+  "notes": "新增原生闪卡展示页和卡牌比赛触控反光，适配不同图片比例；重绘静态卡框，移除相册红心与等级文字。实机验收范围见 LocalFeed/docs/V0.9.4.md。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.4/LocalFeed-v0.9.4.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.4/SHA256SUMS.txt"
 }
