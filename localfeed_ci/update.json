@@ -1,0 +1,6 @@
+{
+  "version": "0.9.5",
+  "notes": "修复查看闪卡页普通卡无特效、触摸移动不连续的问题；新增无需触摸即可看到的待机扫光。实机验收范围见 LocalFeed/docs/V0.9.5.md。",
+  "apk_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.5/LocalFeed-v0.9.5.apk",
+  "checksum_url": "https://github.com/wnbnbn/Oops_2021/releases/download/localfeed-v0.9.5/SHA256SUMS.txt"
+}

@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/feedPager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical" />
+
+    <!-- Activity-level overlay: it must not disappear when ViewPager recycles/rebinds a page. -->
+    <ImageView
+        android:id="@+id/landscapeBackOverlay"
+        android:layout_width="52dp"
+        android:layout_height="48dp"
+        android:layout_gravity="start|top"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="退出横屏"
+        android:padding="11dp"
+        android:src="@drawable/ic_back"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:id="@+id/albumPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#111111"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/albumToolbar"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="6dp">
+
+                <TextView
+                    android:id="@+id/albumTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="相册"
+                    android:textColor="@android:color/white"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/albumCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:alpha="0"
+                    android:textColor="#AFFFFFFF"
+                    android:textSize="13sp"
+                    android:visibility="invisible" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/folderButton"
+                    android:layout_width="50dp"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="目录"
+                    android:textColor="#D9FFFFFF"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/scanButton"
+                    android:layout_width="50dp"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="扫描"
+                    android:textColor="#D9FFFFFF"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/libraryMenuButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="⋮"
+                    android:textColor="#D9FFFFFF"
+                    android:textSize="22sp" />
+
+                <TextView
+                    android:id="@+id/addFolderButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:gravity="center"
+                    android:text="＋"
+                    android:textColor="@android:color/white"
+                    android:textSize="23sp" />
+            </LinearLayout>
+
+            <HorizontalScrollView
+                android:id="@+id/filterScroll"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:fillViewport="false"
+                android:scrollbars="none">
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp">
+
+                    <TextView android:id="@+id/allChip" style="@style/AlbumChip" android:text="全部" />
+                    <TextView android:id="@+id/folderChip" style="@style/AlbumChip" android:text="文件夹" />
+                    <TextView android:id="@+id/videoChip" style="@style/AlbumChip" android:text="视频" />
+                    <TextView android:id="@+id/imageChip" style="@style/AlbumChip" android:text="图片" />
+                    <TextView android:id="@+id/moreFilterChip" style="@style/AlbumChip" android:text="筛选" />
+                    <TextView android:id="@+id/sortChip" style="@style/AlbumChip" android:text="排序" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <LinearLayout
+                android:id="@+id/selectionBar"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="#FF181818"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="6dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/selectionCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="已选择 0 项"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+                <TextView android:id="@+id/selectionAll" style="@style/SelectionAction" android:text="全选" />
+                <TextView android:id="@+id/selectionInvert" style="@style/SelectionAction" android:text="反选" />
+                <TextView android:id="@+id/selectionFavorite" style="@style/SelectionAction" android:text="收藏" />
+                <TextView android:id="@+id/selectionShare" style="@style/SelectionAction" android:text="分享" />
+                <TextView android:id="@+id/selectionDelete" style="@style/SelectionAction" android:text="删除" android:textColor="#FFFF6B6B" />
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/albumGrid"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:clipToPadding="false"
+                android:paddingBottom="52dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/scanStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginStart="20dp"
+            android:layout_marginTop="102dp"
+            android:layout_marginEnd="20dp"
+            android:background="@drawable/transient_status_bg"
+            android:elevation="8dp"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:textColor="#E6FFFFFF"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/emptyState"
+            android:layout_width="280dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="20dp">
+            <TextView android:id="@+id/emptyTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="还没有媒体目录" android:textColor="@android:color/white" android:textSize="20sp" android:textStyle="bold" />
+            <TextView android:id="@+id/emptyMessage" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:gravity="center" android:textColor="#B3FFFFFF" android:textSize="14sp" />
+            <TextView android:id="@+id/emptyAddFolderButton" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginTop="18dp" android:background="@drawable/pill_bg" android:gravity="center" android:paddingStart="18dp" android:paddingEnd="18dp" android:text="选择媒体目录" android:textColor="@android:color/white" android:textStyle="bold" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/imageViewerPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone">
+        <com.localfeed.app.ui.ZoomImageView android:id="@+id/imageViewerImage" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="image viewer" android:scaleType="fitCenter" />
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/comicReader"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:clipToPadding="false"
+            android:visibility="gone" />
+        <FrameLayout
+            android:id="@+id/imageViewerChrome"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+            <LinearLayout
+                android:id="@+id/imageRightActions"
+                android:layout_width="54dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|bottom"
+                android:layout_marginEnd="6dp"
+                android:layout_marginBottom="118dp"
+                android:gravity="center"
+                android:orientation="vertical">
+                <LinearLayout android:id="@+id/imageLikeButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:id="@+id/imageLikeIcon" android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片点赞" android:src="@drawable/ic_heart_outline" />
+                    <TextView android:id="@+id/imageLikeCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@android:color/white" android:textSize="10sp" android:textStyle="bold" android:visibility="gone" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageFavoriteButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:id="@+id/imageFavoriteIcon" android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片收藏" android:src="@drawable/ic_star_outline" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageModeButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:layout_width="32dp" android:layout_height="32dp" android:contentDescription="切换图片浏览方式" android:src="@drawable/ic_album" />
+                    <TextView android:id="@+id/imageModeLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瀑布" android:textColor="@android:color/white" android:textSize="9sp" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/imageMoreButton" android:layout_width="54dp" android:layout_height="54dp" android:foreground="?attr/selectableItemBackgroundBorderless" android:gravity="center" android:orientation="vertical">
+                    <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="图片更多操作" android:src="@drawable/ic_more" />
+                </LinearLayout>
+            </LinearLayout>
+            <TextView
+                android:id="@+id/imageViewerName"
+                android:layout_width="260dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="start|bottom"
+                android:layout_marginStart="14dp"
+                android:layout_marginBottom="32dp"
+                android:ellipsize="middle"
+                android:maxLines="1"
+                android:textColor="#DFFFFFFF"
+                android:textSize="12sp" />
+        </FrameLayout>
+        <TextView android:id="@+id/imageViewerError" android:layout_width="280dp" android:layout_height="wrap_content" android:layout_gravity="center" android:background="@drawable/media_badge_bg" android:gravity="center" android:padding="16dp" android:text="图片读取失败" android:textColor="@android:color/white" android:textSize="14sp" android:visibility="gone" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/taskCenterPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF101012"
+        android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="54dp" android:gravity="center_vertical" android:paddingStart="8dp" android:paddingEnd="8dp">
+                <TextView android:id="@+id/taskCenterBack" android:layout_width="48dp" android:layout_height="48dp" android:gravity="center" android:text="‹" android:textColor="@android:color/white" android:textSize="38sp" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="任务中心" android:textColor="@android:color/white" android:textSize="19sp" android:textStyle="bold" />
+                <TextView android:id="@+id/taskCenterClear" android:layout_width="72dp" android:layout_height="44dp" android:gravity="center" android:text="清除完成" android:textColor="#BFFFFFFF" android:textSize="12sp" />
+            </LinearLayout>
+            <TextView android:id="@+id/taskCenterHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="10dp" android:text="删除等写入任务按顺序执行；扫描和诊断独立运行。这里保留结果，不再打断播放。" android:textColor="#8FFFFFFF" android:textSize="12sp" />
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/taskCenterList" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false" android:paddingBottom="24dp" />
+            <TextView android:id="@+id/taskCenterEmpty" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center" android:text="还没有后台任务" android:textColor="#80FFFFFF" android:textSize="14sp" android:visibility="gone" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom"
+        android:background="#B8000000">
+        <LinearLayout
+            android:layout_width="184dp"
+            android:layout_height="44dp"
+            android:layout_gravity="center_horizontal"
+            android:gravity="center"
+            android:orientation="horizontal">
+            <FrameLayout android:layout_width="92dp" android:layout_height="44dp">
+                <TextView android:id="@+id/feedTab" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="随机刷" android:textColor="@android:color/white" android:textSize="14sp" android:textStyle="bold" />
+                <View android:id="@+id/feedIndicator" android:layout_width="18dp" android:layout_height="2dp" android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="5dp" android:background="@drawable/nav_indicator" />
+            </FrameLayout>
+            <FrameLayout android:layout_width="92dp" android:layout_height="44dp">
+                <TextView android:id="@+id/albumTab" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="相册" android:textColor="#99FFFFFF" android:textSize="14sp" />
+                <View android:id="@+id/albumIndicator" android:layout_width="18dp" android:layout_height="2dp" android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="5dp" android:background="@drawable/nav_indicator" android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>
