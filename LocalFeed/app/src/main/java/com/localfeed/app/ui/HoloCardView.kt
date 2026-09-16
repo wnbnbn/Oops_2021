@@ -1,6 +1,8 @@
 package com.localfeed.app.ui
 
 import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.BlendMode
 import android.graphics.Canvas
@@ -30,6 +32,18 @@ class HoloCardView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : FrameLayout(context, attrs) {
     var dynamic = true
+    /** A dedicated preview must always look holographic, including a zero-like ordinary card. */
+    var minimumEffectLevel = 0
+        set(value) {
+            field = value.coerceIn(0, 5)
+            invalidate()
+        }
+    /** Slow idle sweep used by the dedicated viewer; game cards stay touch-driven. */
+    var ambientMotion = false
+        set(value) {
+            field = value
+            if (value && isAttachedToWindow) startAmbient() else stopAmbient()
+        }
     private var tier = CardTier.forCount(0)
     private val density = resources.displayMetrics.density
     private val rect = RectF()
@@ -42,11 +56,15 @@ class HoloCardView @JvmOverloads constructor(
     private var px = 0f
     private var py = 0f
     private var returnAnimator: ValueAnimator? = null
+    private var ambientAnimator: ValueAnimator? = null
+    private var touching = false
 
     init {
         setWillNotDraw(false)
         clipChildren = false
         clipToPadding = false
+        // Keep receiving MOVE/UP even when the card's child ImageView has no click listener.
+        isClickable = true
         cameraDistance = 8000f * density
         if (Build.VERSION.SDK_INT >= 29) {
             shinePaint.blendMode = BlendMode.SCREEN
@@ -69,12 +87,17 @@ class HoloCardView @JvmOverloads constructor(
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (dynamic) when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touching = true
+                stopAmbient()
                 returnAnimator?.cancel()
                 animate().cancel()
                 updatePose(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> updatePose(event.x, event.y)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> returnToRest()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                touching = false
+                returnToRest()
+            }
         }
         return super.dispatchTouchEvent(event)
     }
@@ -101,13 +124,43 @@ class HoloCardView @JvmOverloads constructor(
                 rotationY = px * 5.5f
                 invalidate()
             }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!touching && ambientMotion) startAmbient()
+                }
+            })
             start()
         }
     }
 
+    private fun startAmbient() {
+        if (!ambientMotion || !isAttachedToWindow || touching || ambientAnimator?.isRunning == true) return
+        ambientAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 2800L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val pose = HoloMotion.ambient(it.animatedValue as Float)
+                px = pose.x
+                py = pose.y
+                rotationX = pose.rotationX
+                rotationY = pose.rotationY
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    private fun stopAmbient() {
+        ambientAnimator?.cancel()
+        ambientAnimator = null
+    }
+
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        if (width <= 0 || height <= 0 || tier.level == 0) return
+        val effectLevel = maxOf(tier.level, minimumEffectLevel)
+        if (width <= 0 || height <= 0 || effectLevel == 0) return
         val inset = 3f * density
         rect.set(inset, inset, width - inset, height - inset)
         val radius = 8f * density
@@ -117,7 +170,7 @@ class HoloCardView @JvmOverloads constructor(
         canvas.clipPath(clip)
 
         val activity = hypot(px.toDouble(), py.toDouble()).toFloat().coerceIn(0f, 1f)
-        val levelStrength = when (tier.level) {
+        val levelStrength = when (effectLevel) {
             1 -> 0.05f
             2 -> 0.08f
             3 -> 0.12f
@@ -139,7 +192,7 @@ class HoloCardView @JvmOverloads constructor(
         shinePaint.alpha = (255f * (levelStrength + activity * levelStrength)).toInt().coerceIn(0, 170)
         canvas.drawRoundRect(rect, radius, radius, shinePaint)
 
-        if (tier.level >= 4) {
+        if (effectLevel >= 4) {
             ridgePaint.shader = LinearGradient(
                 0f, 0f, 18f * density, 18f * density,
                 intArrayOf(0x00FFFFFF, 0x58FFFFFF, 0x00FFFFFF, 0x24FFFFFF, 0x00FFFFFF),
@@ -148,7 +201,7 @@ class HoloCardView @JvmOverloads constructor(
             shaderMatrix.reset()
             shaderMatrix.setTranslate(px * 24f * density, py * 18f * density)
             ridgePaint.shader?.setLocalMatrix(shaderMatrix)
-            ridgePaint.alpha = if (tier.level == 5) 90 else 62
+            ridgePaint.alpha = if (effectLevel == 5) 90 else 62
             canvas.drawRoundRect(rect, radius, radius, ridgePaint)
         }
 
@@ -159,7 +212,7 @@ class HoloCardView @JvmOverloads constructor(
             intArrayOf(0xC8FFFFFF.toInt(), 0x38FFFFFF, 0x00FFFFFF),
             floatArrayOf(0f, .28f, 1f), Shader.TileMode.CLAMP
         )
-        glarePaint.alpha = when (tier.level) {
+        glarePaint.alpha = when (effectLevel) {
             1 -> 28
             2 -> 38
             3 -> 52
@@ -169,7 +222,7 @@ class HoloCardView @JvmOverloads constructor(
         canvas.drawRoundRect(rect, radius, radius, glarePaint)
         canvas.restoreToCount(checkpoint)
 
-        if (tier.level == 5) {
+        if (effectLevel == 5) {
             edgePaint.shader = LinearGradient(
                 rect.left, rect.top, rect.right, rect.bottom,
                 intArrayOf(0xFFFFE8A3.toInt(), 0xFFFFFFFF.toInt(), 0xFFB9863B.toInt(), 0xFFFFE9A8.toInt()),
@@ -183,8 +236,14 @@ class HoloCardView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        stopAmbient()
         returnAnimator?.cancel()
         animate().cancel()
         super.onDetachedFromWindow()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (ambientMotion) startAmbient()
     }
 }

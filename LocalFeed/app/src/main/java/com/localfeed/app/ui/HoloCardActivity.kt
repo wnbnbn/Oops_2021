@@ -93,6 +93,9 @@ class HoloCardActivity : AppCompatActivity() {
         val cardHeight=cardWidth*7/5
         val holo=HoloCardView(this).apply {
             dynamic=true
+            // The dedicated viewer is a holo preview, so even an ordinary card must visibly shine.
+            minimumEffectLevel=4
+            ambientMotion=true
             setLikeCount(record.likeCount)
             setPadding(dp(7),dp(7),dp(7),dp(7))
             elevation=dp(18).toFloat()
